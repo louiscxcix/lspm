@@ -10,6 +10,7 @@
   },
   "firestore": { "rules": "firestore.rules" },
   "hosting": {
+    "site": "louis-lgls-pm",
     "public": "public-build",
     "ignore": [
       "firebase.json",
