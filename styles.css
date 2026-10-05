@@ -423,6 +423,7 @@
 .membership-option strong,.membership-option small { display:block; overflow-wrap:anywhere; }
 .membership-option small { margin-top:4px; color:var(--muted); font-size:12px; }
 .drawer-actions { flex-wrap:wrap; }
+.highlight-note { position:absolute; top:12px; left:12px; z-index:3; max-width:calc(100% - 24px); margin:0; padding:12px 16px; border:1px solid var(--line); border-radius:6px; background:white; color:var(--ink); font-size:14px; }
 /* Mobile keeps the process canvas readable; wide maps and matrices scroll inside their own panels. */
 @media (max-width:600px) {
   body { min-width:320px; }

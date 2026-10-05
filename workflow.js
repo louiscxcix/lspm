@@ -324,7 +324,7 @@
     for(const node of projection.nodes){
       const pos=base.positions[node.id],group=context[node.id];if(!pos||!group)continue;
       for(const [direction,items] of [['input',[...group.machines.map(item=>({...item,kind:'machine'})),...group.inputs.map(item=>({...item,kind:'part'}))]],['output',group.outputs.map(item=>({...item,kind:'part'}))]])
-        items.forEach((item,index)=>satellites.push({...item,stepId:node.id,direction,x:pos.x+(direction==='input'?-218:212),y:pos.y+index*59}));
+        items.forEach((item,index)=>satellites.push({...item,stepId:node.id,partIds:node.partIds||[],direction,x:pos.x+(direction==='input'?-218:212),y:pos.y+index*59}));
     }
     return {...base,satellites};
   }
@@ -580,5 +580,6 @@
     return ids;
   }
   const api = {OBJECT_COLUMNS,RELATION_COLUMNS,SCHEDULE_TYPES,isSubprocess,range,overlaps,ganttWindow,downstream,localGraph,neighborhood,projectGraph,workstreamGraph,productionGraph,productionLanes,productionNetwork,networkLayout,productionContextLayout,productionLaneLayout,workstreamLanes,workstreamLaneLayout,partSummary,partFocusedGraph,workstreamSummary,productionLayout,partWorkflow,layout,parseCSV,previewCSV,importedIds};
+  api.belongsToPart=(item,partId)=>!partId||(item.partIds||[]).includes(partId)&&(!item.relation?.routePartId||item.relation.routePartId===partId);
   if (typeof module === "object") module.exports = api; else root.PMWorkflow = api;
 })(globalThis);

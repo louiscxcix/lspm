@@ -12,6 +12,6 @@ try {
   fs.writeFileSync(path.join(out,'public-workspace.json'),JSON.stringify({publishedAt:new Date().toISOString(),workspace,production}));
 } finally {db.close();}
 fs.copyFileSync(path.join(__dirname,'public-api.js'),path.join(out,'public-api.js'));
-const html=fs.readFileSync(path.join(out,'index.html'),'utf8').replace('<script src="app.js?', '<script src="public-api.js"></script><script src="app.js?');
+const html=fs.readFileSync(path.join(out,'index.html'),'utf8').replace('<script src="app.js?', '<script src="public-api.js"></script><script src="app.js?').replace(/\?v=[^"\s]+/g,'?v='+Date.now());
 fs.writeFileSync(path.join(out,'index.html'),html);
 console.log('Built public read-only workspace. Raw uploaded files and SQLite database are excluded.');

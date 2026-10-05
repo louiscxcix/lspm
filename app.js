@@ -346,7 +346,12 @@ function drawNetworkCanvas(kind,projection,layout) {
   const production=kind==='production',edgeLayer=$(production?'#productionEdges':'#edgeLayer'),nodeLayer=$(production?'#productionNodes':'#nodeLayer');
   if(production)$('#productionLaneLabels').innerHTML='';
   const mode=$(production?'#productionNumbers':'#showNumbers').value,highlight=production?productionHighlightPartId:selectedWorkstream==='production'?mapHighlightPartId:'';
-  const related=selectedId&&!$('#inspector').hidden?($('#focusMode').value==='downstream'&&!production?Flow.downstream(store,selectedId):Flow.neighborhood(store,selectedId)):null;
+  const stage=$(production?'#productionMapStage':'#mapStage');
+  let notice=stage.querySelector('.highlight-note');
+  if(!notice){notice=document.createElement('p');notice.className='highlight-note';notice.setAttribute('role','status');stage.appendChild(notice);}
+  notice.hidden=!highlight||projection.nodes.some(node=>Flow.belongsToPart(node,highlight));
+  notice.textContent=notice.hidden?'':'No recorded route for '+(Model.byId(store,highlight)?.name||'this Part')+'. Add confirmed process links before highlighting.';
+  const related=!highlight&&selectedId&&!$('#inspector').hidden?($('#focusMode').value==='downstream'&&!production?Flow.downstream(store,selectedId):Flow.neighborhood(store,selectedId)):null;
   const query=$('#searchInput').value.trim(),matches=query?new Set(Model.search(store,query).map(item=>item.id)):null;
   if(matches)for(const relation of store.relations)if(matches.has(relation.from)||matches.has(relation.to)){matches.add(relation.from);matches.add(relation.to);}
   const contextMode=Array.isArray(layout.satellites);
@@ -357,7 +362,7 @@ function drawNetworkCanvas(kind,projection,layout) {
     const incoming=item.direction==='input',sx=incoming?x+188:position.x+194,ex=incoming?position.x:x;
     const sy=y+24,ey=position.y+30;
     const path='M '+sx+' '+(incoming?sy:ey)+' C '+((sx+ex)/2)+' '+(incoming?sy:ey)+', '+((sx+ex)/2)+' '+(incoming?ey:sy)+', '+ex+' '+(incoming?ey:sy);
-    const muted=highlight&&item.relation.routePartId&&item.relation.routePartId!==highlight;
+    const muted=!Flow.belongsToPart(item,highlight);
     return '<g class="production-context-link '+(item.kind==='machine'?'machine-link ':'material-link ')+(muted?'route-muted':'')+'"><title>'+h(item.relation.type+' · '+item.entity.name)+'</title><path d="'+path+'" marker-end="url(#'+(production?'productionArrow':'arrow')+')"></path></g>';
   }).join('');
   edgeLayer.innerHTML=projection.edges.map(edge=>{
@@ -365,7 +370,7 @@ function drawNetworkCanvas(kind,projection,layout) {
     const sx=from.x+97,sy=from.y+60,ex=to.x+97,ey=to.y-3;
     const path=ey>sy?'M '+sx+' '+sy+' C '+sx+' '+((sy+ey)/2)+', '+ex+' '+((sy+ey)/2)+', '+ex+' '+ey:'M '+sx+' '+sy+' C '+(sx+105)+' '+(sy+26)+', '+(ex+105)+' '+(ey-26)+', '+ex+' '+ey;
     const failure=edge.type==='on_failure',rework=edge.type==='rework_of',context=edge.type==='subprocess';
-    const muted=highlight&&!(edge.partIds||[]).includes(highlight)||related&&!related.has(edge.from)&&!related.has(edge.to);
+    const muted=!Flow.belongsToPart(edge,highlight)||related&&!related.has(edge.from)&&!related.has(edge.to);
     const arrow=production?failure?'productionFailureArrow':rework?'productionReturnArrow':'productionArrow':'arrow';
     const width=Math.min(4,1.7+(edge.partIds?.length||0)*.35);
     const disposition=Model.byId(store,edge.to)?.productionStage==='Scrap'?'Not fixed · Scrap':rework?'Fixed · retest':'';
@@ -380,11 +385,11 @@ function drawNetworkCanvas(kind,projection,layout) {
     const machine=resources.length===1?machinePrefix+machineName:resources.length>1?resources.length+' linked resources':'';
     const metric=networkMetric(node,mode,highlight);
     const failure=['exception','rework'].includes(entity.branchKind),sub=Flow.isSubprocess(entity);
-    const muted=highlight&&!(node.partIds||[]).includes(highlight)||related&&!related.has(entity.id)||matches&&!matches.has(entity.id);
+    const muted=!Flow.belongsToPart(node,highlight)||related&&!related.has(entity.id)||matches&&!matches.has(entity.id);
     const parts=(node.partIds||[]).map(id=>Model.byId(store,id)?.name||id);
     const full=[entity.name,resources.map(item=>item.name+(item.machineMode==='shared_pool'?' · common':item.machineMode==='specific_asset'?' · dedicated':'')).join(', '),parts.length?'Parts: '+parts.join(', '):'',metric?.text,metric?.title,node.unconfirmed?'Order not recorded':''].filter(Boolean).join(' · ');
     const stage=contextMode&&entity.type==='Production Step'?(entity.productionStage||entity.name.split('·').at(-1).trim()):entity.name;
-    const secondary=contextMode&&entity.type==='Production Step'?(failure?'Problem path':node.unconfirmed?'Order unconfirmed':(node.partIds?.length||0)+' Part route'+(node.partIds?.length===1?'':'s')):machine||entity.type;
+    const secondary=contextMode&&entity.type==='Production Step'?(failure?'Shared · problem path':parts.length===1?short(parts[0].replace(' (route label)',''),25):parts.length>1?parts.length+' shared Part routes':node.unconfirmed?'Order unconfirmed':'No linked Part'):machine||entity.type;
     return '<g class="node flow-node '+(sub?'subprocess ':'')+(failure?'failure-step ':'')+(node.unconfirmed?'unplaced-step ':'')+(muted?'route-muted ':'')+(selectedId===entity.id?'selected':'')+'" data-select="'+h(entity.id)+'" data-route-parts="'+h((node.partIds||[]).join(','))+'" tabindex="0" role="button" aria-pressed="'+(selectedId===entity.id)+'" aria-label="'+h(full)+'" style="--node-color:'+(Model.COLORS[entity.type]||'#138bbb')+'" transform="translate('+pos.x+' '+pos.y+')"><title>'+h(full)+'</title><rect class="flow-card" width="194" height="60" rx="18"></rect><polygon class="activity-mark" points="14,22 23,17 32,22 32,32 23,37 14,32"></polygon><text class="node-name" x="41" y="27">'+h(short(stage,21))+'</text><text class="flow-machine '+(machineMode==='shared_pool'?'shared':machineMode==='specific_asset'?'specific':'')+'" x="41" y="47">'+h(short(secondary,25))+'</text>'+(metric?'<rect class="metric-badge" x="105" y="-23" width="94" height="22" rx="11"></rect><text class="metric-text" x="152" y="-8" text-anchor="middle">'+h(metric.text)+'</text>':'')+'</g>';
   }).join('')+satellites.map(item=>{
     const entity=item.entity,relation=item.relation,material=item.kind==='part',qty=relation.quantity?' ×'+relation.quantity:'',mode=entity.machineMode==='shared_pool'?'Shared pool':entity.machineMode==='specific_asset'?'Specific asset':'Machine family · use unconfirmed';
@@ -392,7 +397,7 @@ function drawNetworkCanvas(kind,projection,layout) {
     const itemKind=Model.isComponentPart(entity)?'C':'P';
     const sublabel=material?(itemKind==='C'?'Component (C)':'Product (P)')+qty:mode;
     const full=[entity.name,relation.type,relation.quantity?'quantity '+relation.quantity+' '+(relation.unit||'pieces'):'quantity unconfirmed',relation.basis,relation.reviewState,relation.evidence].filter(Boolean).join(' · ');
-    const muted=highlight&&relation.routePartId&&relation.routePartId!==highlight;
+    const muted=!Flow.belongsToPart(item,highlight);
     return '<g class="production-satellite '+(material?'component-satellite':'machine-satellite')+(relation.reviewState==='proposed'?' proposed-satellite':'')+(muted?' route-muted':'')+(selectedId===entity.id?' selected':'')+'" data-select="'+h(entity.id)+'" tabindex="0" role="button" aria-label="'+h(full)+'" transform="translate('+item.x+' '+item.y+')"><title>'+h(full)+'</title><rect width="188" height="48" rx="13"></rect><text class="satellite-kind" x="12" y="18">'+(material?itemKind:'M')+'</text><text class="satellite-name" x="32" y="20">'+h(label)+'</text><text class="satellite-meta" x="32" y="37">'+h(sublabel)+'</text></g>';
   }).join('');
 }
@@ -1093,8 +1098,8 @@ $('#mapPartChoices').addEventListener('change',event=>{const id=event.target.dat
 $('#productionPartChoices').addEventListener('change',event=>{const id=event.target.dataset.productionPartChoice;if(!id)return;productionPartsCustomized=true;if(event.target.checked){if(!productionPartIds.includes(id))productionPartIds.push(id);}else productionPartIds=productionPartIds.filter(item=>item!==id);render();saveViewSettings('production');});
 $('#showNumbers').addEventListener('change',()=>{render();saveViewSettings(mapViewKey());});
 $('#productionNumbers').addEventListener('change',()=>{render();saveViewSettings('production');});
-$('#mapHighlight').addEventListener('change',()=>{mapHighlightPartId=$('#mapHighlight').value;render();focusPartInMap('overview',mapHighlightPartId);saveViewSettings('lens-production');});
-$('#productionHighlight').addEventListener('change',()=>{productionHighlightPartId=$('#productionHighlight').value;render();focusPartInMap('production',productionHighlightPartId);saveViewSettings('production');});
+$('#mapHighlight').addEventListener('change',()=>{mapHighlightPartId=$('#mapHighlight').value;selectedId=null;$('#inspector').hidden=true;$('#focusMode').value='';render();focusPartInMap('overview',mapHighlightPartId);saveViewSettings('lens-production');});
+$('#productionHighlight').addEventListener('change',()=>{productionHighlightPartId=$('#productionHighlight').value;selectedId=null;$('#inspector').hidden=true;render();focusPartInMap('production',productionHighlightPartId);saveViewSettings('production');});
 $('#productionLine').addEventListener('change',event=>{const nextLine=event.target.value,previousLine=$('#productionLine').dataset.previous||'';productionSelections[previousLine||'all']={partIds:[...productionPartIds],partSelectionCustomized:productionPartsCustomized,highlightPartId:productionHighlightPartId};const saved=productionSelections[nextLine||'all'];productionPartsCustomized=saved?.partSelectionCustomized===true;productionPartIds=productionPartsCustomized?[...(saved?.partIds||[])]:[];productionHighlightPartId=saved?.highlightPartId||'';$('#productionLine').dataset.previous=nextLine;render();showProductionRouteStart();saveViewSettings('production');});
 for(const id of ['productionSeeMachines','productionSeeComponents'])$('#'+id).addEventListener('change',()=>{render();saveViewSettings('production');});
 for(const id of ['mapSeeMachines','mapSeeComponents'])$('#'+id).addEventListener('change',()=>{render();saveViewSettings(mapViewKey());});
