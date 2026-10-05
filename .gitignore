@@ -1,5 +1,6 @@
 node_modules/
 .firebase/
+public-build/
 .env
 .env.*
 !.env.example

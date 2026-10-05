@@ -82,7 +82,7 @@ async function startLocal() {
   if(location.protocol==='file:'){
     location.replace('http://127.0.0.1:4173/'+location.hash);return;
   }
-  if(location.protocol!=='http:'||!['127.0.0.1','localhost'].includes(location.hostname)){
+  if(!window.PUBLIC_READ_ONLY&&(location.protocol!=='http:'||!['127.0.0.1','localhost'].includes(location.hostname))){
     startupError='This version is local only. Start it with start-local.command, then open http://127.0.0.1:4173/.';render();return;
   }
   try {
@@ -185,7 +185,7 @@ function options() {
     focus:selectedId ? $('#focusMode').value : '',keepPredecessors:$('#keepPredecessors').checked,showSubprocesses:$('#showSubprocesses').checked};
 }
 function render() {
-  $('#storageNote').textContent = 'Local SQLite · this computer';
+  $('#storageNote').textContent = window.PUBLIC_READ_ONLY?'Public cloud snapshot · read only':'Local SQLite · this computer';
   $('#projectHome').hidden=Boolean(store); $('#projectShell').hidden=!store;
   $('#projectForm').hidden=!workspace;
   $('#projectError').textContent=startupError;

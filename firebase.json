@@ -10,7 +10,7 @@
   },
   "firestore": { "rules": "firestore.rules" },
   "hosting": {
-    "public": ".",
+    "public": "public-build",
     "ignore": [
       "firebase.json",
       "README.md",
