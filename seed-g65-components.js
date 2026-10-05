@@ -76,7 +76,7 @@ function applyG65Sample(project) {
     if(machine) {
       project.relations=project.relations.filter(relation=>!(relation.type==='requires'&&relation.from===step.id&&['ls-resource-ict-area','ls-resource-router-room'].includes(relation.to)));
       link(step,'requires',machine,{evidence:'LDM reference: orange operation = shared machine family; physical asset allocation unconfirmed.'});
-    } else if(['EOL','Coating','Coating inspection','Vision inspection','Array cutting','LAM assembly','Stacking','Screw assembly','Screw 1 Assembly (box 1)','Screw 1 Assembly (box 2)','Press bending #1–#5'].includes(step.productionStage)) {
+    } else if(['EOL','Coating','Coating inspection','Vision inspection','Array cutting','Stacking','Screw assembly','Screw 1 Assembly (box 1)','Screw 1 Assembly (box 2)','Press bending #1–#5'].includes(step.productionStage)) {
       const dedicated=ensure('Resource',step.name+' · dedicated machine',{resourceKind:'machine',machineMode:'specific_asset',machineFamily:step.productionStage,context:'White operation in LDM reference: dedicated equipment. Asset ID and exact allocation not yet supplied.'});
       link(step,'requires',dedicated,{evidence:'LDM reference: white operation = dedicated equipment; asset ID unconfirmed.'});
     }

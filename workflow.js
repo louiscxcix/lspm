@@ -116,6 +116,7 @@
     const group=e=>['Part','Part Revision'].includes(e.type)?'parts':['Person','Organization'].includes(e.type)?'people':e.type==='Resource'?'resources':e.type==='Gate'?'gates':'';
     for(const r of project.relations){
       const from=M.byId(project,r.from),to=M.byId(project,r.to);
+      if(partId&&r.routePartId&&!parts.has(r.routePartId))continue;
       if(stepIds.has(r.from)&&stepIds.has(r.to)) {relations.push(r);continue;}
       const other=stepIds.has(r.from)?to:stepIds.has(r.to)?from:null;
       if(other&&layer.has(group(other))) {ids.add(other.id);relations.push(r);}
@@ -254,6 +255,16 @@
     return {nodes:[...nodes.values()],edges:[...edges.values()],parts:routes.lanes.map(lane=>lane.part),unlinked:routes.unlinked};
   }
   function networkLayout(nodes,edges,options={}) {
+    const dispositions=nodes.filter(node=>['NG storage','Scrap'].includes(node.entity.productionStage));
+    if(dispositions.length){
+      const shared=new Set(dispositions.map(node=>node.id));
+      const base=networkLayout(nodes.filter(node=>!shared.has(node.id)),edges.filter(edge=>!shared.has(edge.from)&&!shared.has(edge.to)),options);
+      const anchors=edges.filter(edge=>edge.type==='on_failure'&&shared.has(edge.to)&&!shared.has(edge.from)).map(edge=>base.positions[edge.from]).filter(Boolean);
+      const x=anchors.length?Math.max(...anchors.map(p=>p.x))+240:base.width-210;
+      const y=anchors.length?anchors.reduce((sum,p)=>sum+p.y,0)/anchors.length:36;
+      dispositions.sort((a,b)=>a.entity.productionStage==='NG storage'?-1:1).forEach((node,index)=>{base.positions[node.id]={x,y:y+index*130};});
+      base.width=Math.max(base.width,x+230);base.height=Math.max(base.height,y+dispositions.length*130+40);return base;
+    }
     const nodeById=new Map(nodes.map(node=>[node.id,node])),neighbors=new Map(nodes.map(node=>[node.id,new Set()]));
     for(const edge of edges)if(neighbors.has(edge.from)&&neighbors.has(edge.to)){neighbors.get(edge.from).add(edge.to);neighbors.get(edge.to).add(edge.from);}
     const seen=new Set(),components=[];

@@ -368,7 +368,8 @@ function drawNetworkCanvas(kind,projection,layout) {
     const muted=highlight&&!(edge.partIds||[]).includes(highlight)||related&&!related.has(edge.from)&&!related.has(edge.to);
     const arrow=production?failure?'productionFailureArrow':rework?'productionReturnArrow':'productionArrow':'arrow';
     const width=Math.min(4,1.7+(edge.partIds?.length||0)*.35);
-    return '<g class="'+(muted?'route-muted':'')+'"><title>'+h(edge.type+(edge.evidence?' · '+edge.evidence:'')+(edge.partIds?.length?' · '+edge.partIds.length+' selected Parts':''))+'</title><path class="edge flow-edge '+(failure?'failure-edge':rework?'return-edge':context?'context-edge':'normal-edge')+'" style="--flow-width:'+width+'" d="'+path+'" marker-end="url(#'+arrow+')"></path></g>';
+    const disposition=Model.byId(store,edge.to)?.productionStage==='Scrap'?'Not fixed · Scrap':rework?'Fixed · retest':'';
+    return '<g class="'+(muted?'route-muted':'')+'"><title>'+h(edge.type+(edge.evidence?' · '+edge.evidence:'')+(edge.partIds?.length?' · '+edge.partIds.length+' selected Parts':''))+'</title><path class="edge flow-edge '+(failure?'failure-edge':rework?'return-edge':context?'context-edge':'normal-edge')+'" style="--flow-width:'+width+'" d="'+path+'" marker-end="url(#'+arrow+')"></path>'+(disposition?'<text class="edge-label" x="'+((sx+ex)/2)+'" y="'+((sy+ey)/2-8)+'" text-anchor="middle">'+h(disposition)+'</text>':'')+'</g>';
   }).join('')+satelliteEdges;
   nodeLayer.innerHTML=projection.nodes.map(node=>{
     const entity=node.entity,pos=layout.positions[node.id];if(!pos)return '';

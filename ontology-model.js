@@ -258,7 +258,7 @@
       validateFields(entity);
     }
     for (const entity of store.entities) {
-      if (entity.processLevel === "sub" && !entity.parentWorkId) throw Error("A subprocess needs a parent work item.");
+      if (entity.processLevel === "sub" && !entity.parentWorkId && !(entity.type==='Production Step'&&['NG storage','Scrap'].includes(entity.productionStage))) throw Error("A subprocess needs a parent work item.");
       if (!entity.parentWorkId) continue;
       if (entity.processLevel !== "sub" || !["Work Item", "Production Step", "Gate", "Deliverable"].includes(entity.type)) throw Error("Only subprocess work, production steps, gates or deliverables can have a parent.");
       const parent = byId(store,entity.parentWorkId);
