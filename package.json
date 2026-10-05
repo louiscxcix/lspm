@@ -1,0 +1,11 @@
+{
+  "name": "pm-process-twin-local",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "exceljs": "4.4.0"
+  }
+}

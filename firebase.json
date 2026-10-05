@@ -1,0 +1,25 @@
+{
+  "auth": {
+    "authorizedDomains": ["ontho-166a6.web.app", "ontho-166a6.firebaseapp.com", "localhost"],
+    "providers": {
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "PM Process Twin",
+        "supportEmail": "delaserre1314@gmail.com"
+      }
+    }
+  },
+  "firestore": { "rules": "firestore.rules" },
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "README.md",
+      "test.js",
+      "firestore.rules",
+      "storage.rules",
+      ".firebase/**"
+    ],
+    "cleanUrls": true,
+    "trailingSlash": false
+  }
+}

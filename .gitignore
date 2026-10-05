@@ -1,0 +1,16 @@
+node_modules/
+.firebase/
+.env
+.env.*
+!.env.example
+.local-data/
+*.sqlite
+*.sqlite-*
+*.db
+*.bak
+*.log
+.DS_Store
+docs/**/*.png
+docs/**/*.jpg
+docs/**/*.jpeg
+docs/**/*.svg
