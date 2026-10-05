@@ -200,7 +200,9 @@ function render() {
   $('#lensHeader').hidden=!lens;$('#viewFilters').hidden=entry||activeTab==='History';
   $('#projectHistory').hidden=activeTab!=='History';
   $('#overview').classList.toggle('lens-only',lens);
-  $('.schedule-panel').hidden=lens;
+  $('.schedule-panel').hidden=lens||library&&activeTab!=='Timeline';
+  $('.map-panel').hidden=library&&activeTab==='Timeline';
+  $('#overview').classList.toggle('library-single-panel',library);
   $('#perspectiveControl').hidden=lens;
   $('#mapPartControl').hidden=true;
   $('#mapPartMulti').hidden=!lens||selectedWorkstream!=='production';
@@ -219,16 +221,18 @@ function render() {
   $('#extractSource').disabled=archived||!aiConfigured;
   $('#externalTransfer').textContent=aiConfigured?'Pressing Extract sends only this source to the configured Gemini API. Your full ontology stays on this computer. Review the draft before any ontology update.':'AI not configured. Set GEMINI_API_KEY on the local server; manual and CSV input remain available.';
   if(archived) invalidatePreview();
-  $('#tabs').innerHTML=tabs.map(tab=>'<button data-tab="'+h(tab)+'"'+(activeTab===tab?' aria-current="page"':'')+'>'+h(tab)+'</button>').join('');
-  $('#overview').hidden=activeTab!=='Overview'; $('#inputView').hidden=activeTab!=='Input';
-  $('#recordsView').hidden=['Entry','Overview','Input','History'].includes(activeTab);
+  const visibleTabs=library?['Overview','Timeline',...tabs.filter(tab=>tab!=='Overview')]:tabs;
+  $('#tabs').innerHTML=visibleTabs.map(tab=>'<button data-tab="'+h(tab)+'"'+(activeTab===tab?' aria-current="page"':'')+'>'+h(library&&tab==='Overview'?'Process map':tab)+'</button>').join('');
+  $('#overview').hidden=!['Overview','Timeline'].includes(activeTab); $('#inputView').hidden=activeTab!=='Input';
+  $('#recordsView').hidden=['Entry','Overview','Timeline','Input','History'].includes(activeTab);
   $('#productionView').hidden=activeTab!=='Production'||productionMode!=='Process map';
   $('#wipView').hidden=activeTab!=='Production'||productionMode!=='WIP snapshots';
   $('#productionStaffingView').hidden=activeTab!=='Production'||productionMode!=='WIP snapshots';
   $('#productionLogsView').hidden=activeTab!=='Production'||productionMode!=='Process logs';
   const opt=options(), invalid=opt.start && opt.end && opt.start>opt.end;
   $('#filterError').textContent=invalid?'From must be on or before Through. Fix the range to see results.':'';
-  if(activeTab==='Overview') { renderMap(invalid); if(!lens)renderSchedule(invalid); }
+  if(activeTab==='Overview') { renderMap(invalid); if(!lens&&!library)renderSchedule(invalid); }
+  else if(activeTab==='Timeline')renderSchedule(invalid);
   else if(!['Entry','Input','History'].includes(activeTab)) renderRecords(invalid);
   if(!$('#inspector').hidden) renderInspector();
   renderSavedChange();
