@@ -19,6 +19,17 @@ $('#mapHighlightControl').insertAdjacentHTML('afterend','<div id="mapContextCont
 $('#productionPartMulti').insertAdjacentHTML('afterend','<label>Highlight Part<select id="productionHighlight"><option value="">All selected Parts</option></select></label>');
 $('#productionHighlight').closest('label').after($('#productionContextControls').content);
 $('#productionFit').textContent='Fit';
+for(const [fitId,panelSelector] of [['fitMap','.map-panel'],['productionFit','#productionView']]){
+  const button=document.createElement('button');button.className='button map-fullscreen-button';button.type='button';button.textContent='Full screen';button.setAttribute('aria-pressed','false');
+  $('#'+fitId).parentElement.appendChild(button);
+  button.addEventListener('click',()=>{
+    const panel=$(panelSelector),open=!panel.classList.contains('map-fullscreen');
+    document.querySelectorAll('.map-fullscreen').forEach(el=>el.classList.remove('map-fullscreen'));
+    panel.classList.toggle('map-fullscreen',open);document.body.classList.toggle('map-fullscreen-open',open);
+    document.querySelectorAll('.map-fullscreen-button').forEach(el=>{el.textContent=el===button&&open?'Exit full screen':'Full screen';el.setAttribute('aria-pressed',String(el===button&&open));});
+  });
+}
+document.addEventListener('keydown',event=>{if(event.key==='Escape'){document.querySelector('.map-fullscreen .map-fullscreen-button')?.click();}});
 $('#fitMap').insertAdjacentHTML('beforebegin','<span id="mapZoomLevel" class="map-zoom-level" aria-live="polite">100%</span>');
 $('#productionFit').insertAdjacentHTML('beforebegin','<span id="productionZoomLevel" class="map-zoom-level" aria-live="polite">100%</span>');
 $('#mapPartChoices').insertAdjacentHTML('beforebegin','<div class="map-part-actions"><button type="button" data-map-parts-action="all">All</button><button type="button" data-map-parts-action="none">None</button></div>');

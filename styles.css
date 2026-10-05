@@ -423,6 +423,12 @@
 .membership-option strong,.membership-option small { display:block; overflow-wrap:anywhere; }
 .membership-option small { margin-top:4px; color:var(--muted); font-size:12px; }
 .drawer-actions { flex-wrap:wrap; }
+body.map-fullscreen-open { overflow:hidden; }
+.map-panel.map-fullscreen,#productionView.map-fullscreen { position:fixed; inset:0; z-index:7; margin:0; width:100vw; height:100dvh; max-height:none; display:flex; flex-direction:column; background:white; border:0; border-radius:0; padding:0; }
+.map-fullscreen .map-stage { flex:1; min-height:0; height:auto; max-height:none; }
+.map-fullscreen .map-controls,.map-fullscreen .production-controls { flex-shrink:0; max-height:35dvh; overflow:auto; }
+.map-fullscreen .map-footer,.map-fullscreen .production-legend { flex-shrink:0; }
+.map-fullscreen .production-heading { padding:12px 16px; }
 .overview.library-single-panel { grid-template-columns:minmax(0,1fr); }
 .overview.library-single-panel .map-panel { border-right:0; }
 .overview.library-single-panel .schedule-panel { border-top:0; }
