@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SIN LOTE | Guía de respuesta operativa</title>
+<style>
+:root{--paper:#f3f6f8;--panel:#fff;--ink:#172b3b;--muted:#5d7180;--line:#d5e0e6;--blue:#1261d8;--cyan:#0d93a5;--orange:#bf611c;--red:#b53232;--green:#287451;font-family:"Avenir Next","Segoe UI",sans-serif;color:var(--ink);background:var(--paper)}
+*{box-sizing:border-box}body{margin:0;min-width:320px}button{font:inherit;cursor:pointer}a{color:var(--blue)}.top{background:#142b3a;color:white;padding:18px clamp(16px,4vw,44px);display:flex;align-items:center;gap:14px;flex-wrap:wrap}.mark{width:22px;height:30px;border:2px solid #5aced8;border-radius:12px 12px 3px 3px}.brand{font-weight:700}.brand small{display:block;font:11px ui-monospace,monospace;letter-spacing:.12em;color:#adbeca;margin-top:4px}.top .right{margin-left:auto;color:#adbeca;font-size:12px}.wrap{max-width:1180px;margin:auto;padding:28px clamp(14px,3vw,32px) 56px}.eyebrow{font:600 11px ui-monospace,monospace;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}h1{font-size:clamp(28px,4vw,42px);letter-spacing:-.04em;margin:8px 0 12px}h2{font-size:21px;letter-spacing:-.025em;margin:0 0 10px}h3{font-size:15px;margin:0 0 8px}p{line-height:1.6}.intro{max-width:780px;color:var(--muted)}.notice{border:1px solid #e7c6a6;background:#fff7ed;border-left:4px solid var(--orange);padding:14px 16px;border-radius:6px;margin:22px 0}.section{margin-top:28px}.section-head{display:flex;align-items:end;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:12px}.muted{color:var(--muted);font-size:13px}.map{background:#f7fafc;border:1px solid var(--line);border-radius:8px;padding:18px;overflow:hidden;background-image:radial-gradient(#d3dfe5 .8px,transparent .8px);background-size:18px 18px}.flow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:stretch}.node{background:white;border:1px solid #b9cbd5;border-radius:7px;padding:15px;position:relative;min-width:0}.node:before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--blue);border-radius:7px 0 0 7px}.node.orange:before{background:var(--orange)}.node.red:before{background:var(--red)}.node.green:before{background:var(--green)}.node strong{display:block;margin-bottom:6px}.node p{font-size:13px;color:var(--muted);margin:0}.down{text-align:center;color:#8195a3;font-size:20px;padding:6px}.gate{max-width:600px;margin:14px auto;text-align:center;background:#eaf3ff;border:1px solid #b6d2f7;padding:16px;border-radius:7px;font-weight:700}.choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.choice{border:1px solid var(--line);border-radius:7px;background:white;text-align:left;padding:17px;display:block;width:100%;color:var(--ink)}.choice:hover,.choice[aria-pressed=true]{border-color:var(--blue);background:#eff6ff;box-shadow:inset 0 0 0 1px var(--blue)}.tag{display:inline-block;font:600 10px ui-monospace,monospace;letter-spacing:.08em;padding:5px 7px;border-radius:4px;background:#eaf1f5;color:#456071;margin-bottom:10px}.choice b{display:block;font-size:16px;margin-bottom:7px}.choice span:last-child{display:block;color:var(--muted);font-size:13px;line-height:1.5}.detail{margin-top:14px;background:white;border:1px solid var(--line);border-radius:8px;overflow:hidden}.detail[hidden]{display:none}.detail-head{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:start}.detail-body{padding:20px}.steps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.step{display:flex;gap:11px;padding:13px;border:1px solid var(--line);border-radius:6px;background:#fbfdfe}.step .num{width:26px;height:26px;flex:none;border-radius:50%;background:#eaf3ff;color:var(--blue);display:grid;place-items:center;font-weight:700;font-size:12px}.step p{font-size:13px;color:var(--muted);margin:5px 0 0}.alert{padding:13px 15px;border-radius:6px;margin-top:14px;font-size:13px;line-height:1.55}.alert.red{background:#fff1f0;border:1px solid #efc3c0;color:#7f2929}.alert.blue{background:#eef6ff;border:1px solid #c6dcf8}.alert.green{background:#edf8f1;border:1px solid #c4e4d0;color:#225a3c}.checklist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.check{display:flex;gap:10px;padding:12px;border:1px solid var(--line);border-radius:6px;background:white;font-size:13px;line-height:1.5}.check input{margin-top:3px;accent-color:var(--blue)}.check.done{background:#edf8f1;border-color:#b6ddc5}.progress{height:6px;background:#e3eaee;border-radius:8px;overflow:hidden;margin:10px 0 6px}.progress span{display:block;height:100%;width:0;background:var(--green);transition:width .15s}.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.btn{border:1px solid var(--line);background:white;padding:9px 13px;border-radius:5px;font-size:12px;font-weight:700;color:var(--ink)}.btn.primary{background:var(--blue);color:white;border-color:var(--blue)}.btn:hover{filter:brightness(.97)}.footer{margin-top:30px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted);font-size:12px}.footer strong{color:var(--ink)}@media(max-width:760px){.flow,.choices{grid-template-columns:1fr}.steps,.checklist{grid-template-columns:1fr}.top .right{margin-left:0;width:100%}.map{padding:12px}}@media print{body{background:white}.top{background:#142b3a!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.wrap{max-width:none;padding:16px}.actions,.right button{display:none}.detail[hidden]{display:block}.choice{break-inside:avoid}.map{background:white}.choices{grid-template-columns:repeat(3,1fr)}}
+</style>
+</head>
+<body>
+<header class="top"><div class="mark" aria-hidden="true"></div><div class="brand">PM Process Twin<small>PRODUCTION · OPERATIONAL GUIDE</small></div><div class="right">SIN LOTE / MES mismatch response</div></header>
+<main class="wrap">
+<div class="eyebrow">Risk management · Guía de respuesta</div>
+<h1>¿Qué hacer cuando aparece <span style="color:var(--red)">SIN LOTE</span>?</h1>
+<p class="intro">Guía de apoyo para identificar el tipo de incidencia, contener el riesgo y escalar la corrección. Compara siempre el producto físico con el registro MES. Esta guía no sustituye el procedimiento autorizado de producción ni la aprobación del responsable.</p>
+<div class="notice"><strong>Regla principal:</strong> no inventar un LOT, no volver a ejecutar una operación y no mover el producto al siguiente proceso solo para hacer coincidir la pantalla. Primero confirma el estado físico y el historial MES; después solicita la corrección aprobada.</div>
+
+<section class="section">
+<div class="section-head"><div><div class="eyebrow">01 · Flujo general</div><h2>Identifica antes de actuar</h2></div><span class="muted">Selecciona una situación abajo para ver los pasos.</span></div>
+<div class="map"><div class="flow">
+<div class="node"><strong>1. Detener y contener</strong><p>Identifica la pieza, array, bandeja y estación. Evita que avance sin trazabilidad.</p></div>
+<div class="node orange"><strong>2. Comparar físico vs. MES</strong><p>Revisa LOT, QR, estación real, última operación registrada y estado mostrado.</p></div>
+<div class="node red"><strong>3. Clasificar la incidencia</strong><p>LOT existe, LOT no existe o el proceso físico no coincide con el historial.</p></div>
+</div><div class="down">↓</div><div class="gate">¿Cuál de estas tres situaciones describe el caso?</div>
+<div class="choices" role="group" aria-label="Tipo de incidencia">
+<button class="choice" data-case="exists" aria-pressed="false"><span class="tag">CASO 01</span><b>LOT generado</b><span>El LOT existe, pero puede tener errores en el historial de proceso.</span></button>
+<button class="choice" data-case="missing" aria-pressed="false"><span class="tag">CASO 02</span><b>LOT no generado</b><span>El LOT requerido no existe o no se generó.</span></button>
+<button class="choice" data-case="wrong" aria-pressed="false"><span class="tag">CASO 03</span><b>Proceso incorrecto</b><span>La ubicación/proceso físico y el historial MES no coinciden.</span></button>
+</div>
+</div>
+<div id="detail-exists" class="detail" hidden><div class="detail-head"><div><div class="eyebrow">Caso 01</div><h2>LOT generado, historial posiblemente incorrecto</h2></div><span class="tag">VERIFICAR HISTORIAL</span></div><div class="detail-body"><div class="steps">
+<div class="step"><span class="num">1</span><div><strong>Confirma el LOT y el QR</strong><p>Verifica que el LOT corresponda al producto físico y que el código pueda leerse.</p></div></div>
+<div class="step"><span class="num">2</span><div><strong>Compara la última operación</strong><p>Contrasta la estación real con la última operación registrada en MES. No asumas que el LOT correcto significa historial correcto.</p></div></div>
+<div class="step"><span class="num">3</span><div><strong>Contén y escala</strong><p>Si hay diferencia, retén el producto y avisa al responsable de producción/MES para revisar el historial.</p></div></div>
+<div class="step"><span class="num">4</span><div><strong>Reanuda solo con autorización</strong><p>Continúa cuando el historial haya sido corregido por el proceso autorizado y el responsable confirme el siguiente paso.</p></div></div>
+</div><div class="alert blue"><strong>Resultado esperado:</strong> LOT identificado, historial verificado y diferencia documentada. No crees un segundo LOT como solución improvisada.</div></div></div>
+<div id="detail-missing" class="detail" hidden><div class="detail-head"><div><div class="eyebrow">Caso 02</div><h2>LOT no generado</h2></div><span class="tag">NO CREAR SIN VALIDAR</span></div><div class="detail-body"><div class="steps">
+<div class="step"><span class="num">1</span><div><strong>Detén el avance del material afectado</strong><p>Separa/identifica el producto para evitar mezclarlo con material trazable.</p></div></div>
+<div class="step"><span class="num">2</span><div><strong>Confirma array y etiquetas</strong><p>Cuenta las posiciones/piezas presentes y verifica QR, modelo y condición física.</p></div></div>
+<div class="step"><span class="num">3</span><div><strong>Revisa la regla de generación</strong><p>Confirma con el responsable el requisito de array completo y la secuencia aprobada para LOT parcial.</p></div></div>
+<div class="step"><span class="num">4</span><div><strong>Solicita la recuperación aprobada</strong><p>Registra lo observado y espera instrucciones de Producción/MES antes de crear LOT o ejecutar Router.</p></div></div>
+</div><div class="alert red"><strong>Punto pendiente de confirmación:</strong> la secuencia exacta cuando el array contiene solo algunas posiciones (por ejemplo, 2–5) no está confirmada. No improvisar el orden de Router, LOT individual o QR representativo.</div></div></div>
+<div id="detail-wrong" class="detail" hidden><div class="detail-head"><div><div class="eyebrow">Caso 03</div><h2>Proceso físico diferente del historial MES</h2></div><span class="tag">CONTENER Y CORREGIR</span></div><div class="detail-body"><div class="steps">
+<div class="step"><span class="num">1</span><div><strong>Confirma la posición física</strong><p>Identifica en qué operación está realmente el producto; no te bases solo en la pantalla.</p></div></div>
+<div class="step"><span class="num">2</span><div><strong>Compara el historial completo</strong><p>Revisa LOT/QR, estación anterior, operación registrada y cualquier registro disponible.</p></div></div>
+<div class="step"><span class="num">3</span><div><strong>Retén y notifica</strong><p>No avances, no repitas la operación ni cambies manualmente el estado para forzar una coincidencia.</p></div></div>
+<div class="step"><span class="num">4</span><div><strong>Corrige por el procedimiento autorizado</strong><p>El responsable debe definir cómo reconciliar MES con la condición física y confirmar desde qué proceso puede continuar el producto.</p></div></div>
+</div><div class="alert red"><strong>Importante:</strong> si MES muestra Router, pero el producto físico ya avanzó a una operación posterior, primero verifica la condición real y solicita la corrección aprobada. No se debe asumir que hay que sustituir una máquina.</div></div></div>
+</section>
+
+<section class="section">
+<div class="section-head"><div><div class="eyebrow">02 · Registro de control</div><h2>Checklist antes de liberar el material</h2><p class="muted">Marca cada punto una vez confirmado. El progreso es local a esta página y no se guarda en MES.</p></div><div><strong id="progressText">0 de 6</strong><div class="progress"><span id="progressBar"></span></div></div></div>
+<div class="checklist" id="checklist">
+<label class="check"><input type="checkbox"><span><strong>Producto identificado</strong><br>Modelo, pieza/array, bandeja y estación física.</span></label>
+<label class="check"><input type="checkbox"><span><strong>LOT / QR verificados</strong><br>Existencia, lectura y correspondencia con el producto.</span></label>
+<label class="check"><input type="checkbox"><span><strong>Historial MES comparado</strong><br>Última operación registrada vs. proceso físico real.</span></label>
+<label class="check"><input type="checkbox"><span><strong>Material contenido</strong><br>No avanzó ni se mezcló mientras se investiga.</span></label>
+<label class="check"><input type="checkbox"><span><strong>Responsable informado</strong><br>Producción / MES / Calidad según el procedimiento local.</span></label>
+<label class="check"><input type="checkbox"><span><strong>Autorización y evidencia registradas</strong><br>Corrección aprobada, evidencia y próximo paso definidos.</span></label>
+</div>
+<div class="alert blue"><strong>Regla de liberación:</strong> no marcar el caso como resuelto solo porque aparece un LOT en pantalla. Debe confirmarse la correspondencia entre producto físico, trazabilidad MES y autorización de continuación.</div>
+<div class="actions"><button class="btn" id="resetChecklist">Reiniciar checklist</button><button class="btn primary" onclick="window.print()">Imprimir / Guardar PDF</button><button class="btn" id="clearCase">Cerrar detalle del caso</button></div>
+</section>
+<footer class="footer"><strong>Estado de esta guía: borrador operativo.</strong> Los criterios de recuperación para array parcial, las personas autorizadas para modificar MES y el criterio formal de liberación deben confirmarse con el dueño del proceso antes de usarla como instrucción oficial. No reemplaza el procedimiento aprobado de la planta.</footer>
+</main>
+<script>
+const buttons=[...document.querySelectorAll('[data-case]')];
+buttons.forEach(button=>button.addEventListener('click',()=>{
+ const id=button.dataset.case, panel=document.getElementById('detail-'+id), wasOpen=!panel.hidden;
+ document.querySelectorAll('.detail').forEach(item=>item.hidden=true);
+ buttons.forEach(item=>item.setAttribute('aria-pressed','false'));
+ if(!wasOpen){panel.hidden=false;button.setAttribute('aria-pressed','true');panel.scrollIntoView({behavior:'smooth',block:'start'});}
+}));
+const checks=[...document.querySelectorAll('#checklist input')];
+function updateProgress(){let count=checks.filter(c=>c.checked).length;document.getElementById('progressText').textContent=count+' de '+checks.length;document.getElementById('progressBar').style.width=(count/checks.length*100)+'%';checks.forEach(c=>c.closest('.check').classList.toggle('done',c.checked));}
+checks.forEach(c=>c.addEventListener('change',updateProgress));
+document.getElementById('resetChecklist').addEventListener('click',()=>{checks.forEach(c=>c.checked=false);updateProgress();});
+document.getElementById('clearCase').addEventListener('click',()=>{document.querySelectorAll('.detail').forEach(item=>item.hidden=true);buttons.forEach(item=>item.setAttribute('aria-pressed','false'));});
+</script>
+</body></html>
