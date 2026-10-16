@@ -1,5 +1,6 @@
 node_modules/
 supabase/functions/ontology/app.mjs
+supabase/.temp/
 .firebase/
 public-build/
 .env

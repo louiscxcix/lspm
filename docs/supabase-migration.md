@@ -8,7 +8,7 @@ The code is migrated and tested locally. Applying the remote schema, deploying t
 
 ## Deploy
 
-Requires Node 25.8.2 or newer. From the repository root:
+Use Node 24 LTS (validated with 24.19.0). From the repository root:
 
 ```sh
 npm ci
@@ -17,7 +17,9 @@ node scripts/deploy-supabase.js
 npm run build:cloud
 ```
 
-Set `SUPABASE_ACCESS_TOKEN` securely before running the deployment script. Obtain a personal access token with access to this project through your Supabase account settings. Do not commit it, put it in browser configuration, or paste it into chat. The script uses the Supabase Management API, applies the schema in a transaction, and deploys the Edge Function. It refuses an unknown existing `pm` schema and recognizes its own migration on repeated runs. Schema changes and function deployment are separate remote operations; a failed function deployment may leave the schema successfully installed, and retrying is safe.
+Set `SUPABASE_ACCESS_TOKEN` securely before running the deployment script. Obtain a personal access token with access to this project through your Supabase account settings. Do not commit it, put it in browser configuration, or paste it into chat. The script applies ordered SQL migrations through the Supabase Management API and deploys the Edge Function using the pinned official Supabase CLI. It refuses an unknown existing `pm` schema and recognizes applied versions on repeated runs. Add future changes in new numbered migration files instead of modifying applied SQL. Schema changes and function deployment are separate remote operations; a failed function deployment may leave the schema successfully installed, and retrying recognizes that state.
+
+GitHub Actions splits deployment into **Apply Supabase database migrations**, **Deploy Supabase Edge Function**, and **Verify hosted Supabase endpoint**. The release check requires the actual application's unauthorized response and matching CORS headers before publishing the frontend. It establishes endpoint reachability and authentication/CORS behavior; an actual signed-in save/read test is still required to validate the live user/database path. `npm run verify:supabase` repeats that endpoint check.
 
 The function uses Supabase's injected `SUPABASE_DB_URL` and public keys. It verifies every access token against Supabase Auth before opening a database transaction. Gateway JWT verification is disabled to support publishable keys; the function's own user authentication is mandatory. Database queries run as `authenticated` under the verified user's identity, with row-level security. Database credentials and service-role keys never enter the browser.
 

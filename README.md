@@ -6,7 +6,7 @@ One local SQLite database holds all ontology objects. Projects are saved selecti
 
 ## Start
 
-Requires Node.js 25.8.2 or newer with built-in `node:sqlite`.
+Use Node.js 24 LTS (validated with 24.19.0), with built-in `node:sqlite`.
 
 ```bash
 cd "/Users/louis/Desktop/lg/mex/ontology-app"

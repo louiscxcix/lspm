@@ -1,32 +1,34 @@
 'use strict';
-const fs=require('node:fs'),path=require('node:path');
-const {createManagementApi}=require('./supabase-management');
+const path=require('node:path');
+const {spawnSync}=require('node:child_process');
+const {createManagementApi,redact}=require('./supabase-management');
+const {applyMigrations}=require('./supabase-migrations');
+const {verifyBackend}=require('./verify-supabase');
 const project='ahzpuefosoajwwgbfhng';
 async function main(){
+  const mode=process.argv[2]||'--all';
+  if(!['--all','--schema-only','--function-only'].includes(mode))throw Error('Use --schema-only, --function-only or no argument.');
   const token=process.env.SUPABASE_ACCESS_TOKEN?.trim();
   if(!token)throw Error('Missing SUPABASE_ACCESS_TOKEN. Add it as a GitHub repository Actions secret, or supply it securely to this process.');
   if(/^(sb_publishable_|sb_secret_|eyJ)/.test(token))throw Error('SUPABASE_ACCESS_TOKEN must be a personal access token from Supabase account settings, not a project API key.');
-  const api=createManagementApi({project,token});
-  const query=sql=>api('/database/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:sql})});
-  console.log('Checking PostgreSQL migration for project '+project+'…');
-  // Stop rather than apply a migration to a pre-existing, unrecognized pm schema.
-  const result=await query("SELECT to_regclass('pm.meta') IS NOT NULL AS present");
-  if(result[0]?.present){
-    const applied=await query("SELECT to_regclass('pm.migration_version') IS NOT NULL AS present");
-    if(!applied[0]?.present)throw Error('Unrecognized existing pm schema. Review it before migration.');
-    const versions=await query('SELECT version FROM pm.migration_version');
-    if(versions.length!==1||versions[0].version!=='202610160001')throw Error('Unexpected database migration version.');
-  }else{
-    console.log('Applying PostgreSQL migration…');
-    const migration=fs.readFileSync(path.join(__dirname,'../supabase/migrations/202610160001_ontology.sql'),'utf8');
-    await query('BEGIN;\n'+migration+'\nCOMMIT;');
-    console.log('Applied owner-isolated PostgreSQL schema.');
+  if(mode!=='--function-only'){
+    const api=createManagementApi({project,token});
+    const query=sql=>api('/database/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:sql})});
+    console.log('Checking PostgreSQL migrations for project '+project+'…');
+    await applyMigrations(query,path.join(__dirname,'../supabase/migrations'));
   }
-  const form=new FormData();
-  form.set('metadata',JSON.stringify({name:'ontology',entrypoint_path:'index.ts',verify_jwt:false}));
-  for(const filename of ['index.ts','app.mjs'])form.append('file',new Blob([fs.readFileSync(path.join(__dirname,'../supabase/functions/ontology',filename))],{type:'application/octet-stream'}),filename);
-  console.log('Deploying ontology Edge Function…');
-  await api('/functions/deploy?slug=ontology',{method:'POST',body:form});
-  console.log('Deployed ontology function. Sign in through the app to verify your own workspace.');
+  if(mode!=='--schema-only'){
+    console.log('Deploying ontology Edge Function with the official Supabase CLI…');
+    const cli=path.join(__dirname,'../node_modules/.bin/supabase');
+    const result=spawnSync(cli,['functions','deploy','ontology','--project-ref',project,'--use-api','--no-verify-jwt','--yes'],{cwd:path.join(__dirname,'..'),stdio:'inherit',env:{...process.env,SUPABASE_ACCESS_TOKEN:token}});
+    if(result.error)throw Error('Could not start Supabase CLI. Run npm ci first.');
+    if(result.status!==0){process.exitCode=result.status||1;return;}
+    if(mode==='--all')await verifyBackend();
+  }
 }
-main().catch(error=>{console.error(error.message);process.exitCode=1;});
+main().catch(error=>{
+  const message=redact(error.message,process.env.SUPABASE_ACCESS_TOKEN?.trim());
+  console.error(message);
+  if(process.env.GITHUB_ACTIONS==='true')console.error('::error title=Supabase deployment::'+message.replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A'));
+  process.exitCode=1;
+});
