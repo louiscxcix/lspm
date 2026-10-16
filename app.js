@@ -93,12 +93,12 @@ async function startLocal() {
   if(location.protocol==='file:'){
     location.replace('http://127.0.0.1:4173/'+location.hash);return;
   }
-  if(!window.PUBLIC_READ_ONLY&&(location.protocol!=='http:'||!['127.0.0.1','localhost'].includes(location.hostname))){
+  if(!window.PUBLIC_READ_ONLY&&!window.CLOUD_BACKEND&&(location.protocol!=='http:'||!['127.0.0.1','localhost'].includes(location.hostname))){
     startupError='This version is local only. Start it with start-local.command, then open http://127.0.0.1:4173/.';render();return;
   }
   try {
     workspace=await LocalAPI.load();aiConfigured=(await LocalAPI.health()).aiConfigured;startupError='';route();
-  } catch (error) { startupError=/failed to fetch/i.test(error.message)?'Local server is offline. Open start-local.command and reload this page.':'Local database error: '+error.message;render(); }
+  } catch (error) { startupError=/failed to fetch/i.test(error.message)?(window.CLOUD_BACKEND?'Cannot reach your online workspace. Check your connection and try again.':'Local server is offline. Open start-local.command and reload this page.'):(window.CLOUD_BACKEND?'Workspace: ':'Local database error: ')+error.message;render(); }
 }
 function invalidatePreview() { preview = null; $('#applyCSV').disabled = true; }
 function setInputMode(mode) {
@@ -196,7 +196,7 @@ function options() {
     focus:selectedId ? $('#focusMode').value : '',keepPredecessors:$('#keepPredecessors').checked,showSubprocesses:$('#showSubprocesses').checked};
 }
 function render() {
-  $('#storageNote').textContent = window.PUBLIC_READ_ONLY?'Public cloud snapshot · read only':'Local SQLite · this computer';
+  $('#storageNote').textContent = window.PUBLIC_READ_ONLY?'Public cloud snapshot · read only':window.CLOUD_BACKEND?'Supabase · private workspace':'Local SQLite · this computer';
   $('#projectHome').hidden=Boolean(store); $('#projectShell').hidden=!store;
   $('#projectForm').hidden=!workspace;
   $('#projectError').textContent=startupError;
@@ -1426,7 +1426,7 @@ $('#revertSavedChange').onclick=async ()=>{
   }catch(error){$('#savedChangeError').textContent=error.message;}
   finally{$('#revertSavedChange').disabled=false;}
 };
-$('#exportButton').onclick=()=>{window.location.href='/api/export';};
+$('#exportButton').onclick=async()=>{try{if(LocalAPI.exportBackup)await LocalAPI.exportBackup();else window.location.href='/api/export';}catch(error){toast(error.message);}};
 $('#projectForm').onsubmit=async event=>{
   event.preventDefault();try{const project=Projects.create($('#projectName').value),next=structuredClone(workspace);next.projects.push(project);await commit(next);event.target.reset();location.hash='/projects/'+project.id;}
   catch(error){$('#projectError').textContent=error.message;}

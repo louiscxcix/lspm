@@ -1,0 +1,53 @@
+'use strict';
+const {Buffer}=require('node:buffer');
+const {createRequestHandler}=require('./server');
+const {importBackup}=require('./import-backup');
+const MAX_BODY=16_000_000;
+async function bodyBytes(request){
+  const chunks=[];let size=0;
+  if(request.body)for await(const chunk of request.body){size+=chunk.length;if(size>MAX_BODY)throw Error('Request exceeds 16 MB.');chunks.push(Buffer.from(chunk));}
+  return Buffer.concat(chunks);
+}
+
+function createCloudHandler({authenticate,withStore,allowedOrigins,geminiKey='',geminiFetch=globalThis.fetch}){
+  const origins=new Set(allowedOrigins);
+  return async request=>{
+    const origin=request.headers.get('origin');
+    const headers=new Headers({'Content-Type':'application/json','Cache-Control':'no-store','Vary':'Origin'});
+    const respond=(status,value)=>new Response(JSON.stringify(value),{status,headers});
+    if(origin&&!origins.has(origin))return respond(403,{error:'Origin not allowed.'});
+    if(origin){headers.set('Access-Control-Allow-Origin',origin);headers.set('Access-Control-Allow-Headers','authorization,apikey,content-type,x-client-info');headers.set('Access-Control-Allow-Methods','GET,POST,PUT,OPTIONS');}
+    if(request.method==='OPTIONS')return new Response(null,{status:204,headers});
+    const token=request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1];
+    if(!token)return respond(401,{error:'Sign in to open your workspace.'});
+    let user;
+    try{user=await authenticate(token);}catch{return respond(401,{error:'Your session has expired. Sign in again.'});}
+    if(!user?.id)return respond(401,{error:'Sign in to open your workspace.'});
+    const url=new URL(request.url);
+    const pathname=url.pathname.replace(/^\/functions\/v1\/ontology/,'');
+    if(!pathname.startsWith('/api/'))return respond(404,{error:'Not found.'});
+    let bytes;
+    try{bytes=await bodyBytes(request);}catch{return respond(413,{error:'Request exceeds 16 MB.'});}
+    try{
+      return await withStore(user.id,async (store,client)=>{
+        if(pathname==='/api/import'&&request.method==='POST'){
+          if(!request.headers.get('content-type')?.startsWith('application/json'))return respond(400,{error:'Use application/json.'});
+          return respond(200,await importBackup(store,client,JSON.parse(bytes.toString())));
+        }
+        let status=200,body='';
+        const res={setHeader:(key,value)=>headers.set(key,value),writeHead:(code,values)=>{status=code;for(const [key,value] of Object.entries(values||{}))headers.set(key,value);},end:value=>{body=value||'';}};
+        const req={method:request.method,url:pathname+url.search,headers:Object.fromEntries(request.headers),async *[Symbol.asyncIterator](){yield bytes;}};
+        await createRequestHandler({store,geminiKey,geminiFetch})(req,res);
+        // The shared HTTP handler reports validation failures as responses. Throw so
+        // its outer PostgreSQL transaction rolls back even after a partial write.
+        if(status>=400){const error=Error('API request rejected.');error.response=new Response(body,{status,headers});throw error;}
+        return new Response(body,{status,headers});
+      });
+    }catch(error){
+      if(error.response)return error.response;
+      if(/empty account|Unsupported backup|Missing backup|Invalid backup|Unsupported backup columns|Invalid source/.test(error.message))return respond(400,{error:error.message});
+      return respond(500,{error:'Unable to complete the request. No changes were committed.'});
+    }
+  };
+}
+module.exports={createCloudHandler};

@@ -475,3 +475,8 @@ body.map-fullscreen-open { overflow:hidden; }
   dialog { width:calc(100vw - 24px); max-width:calc(100vw - 24px); max-height:90svh; padding:16px; }
   .production-logs-view { padding:14px; }
 }
+.cloud-auth{margin:1rem;padding:1rem;border:1px solid #ccd5df;border-radius:8px;background:#fff}
+.cloud-auth form{display:flex;flex-wrap:wrap;align-items:end;gap:.75rem}
+.cloud-auth form[hidden]{display:none}
+.cloud-auth label{display:grid;gap:.25rem}
+.cloud-auth p:empty{display:none}

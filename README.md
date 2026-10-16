@@ -1,5 +1,7 @@
 # PM Process Twin — local ontology
 
+The Supabase migration adds a private, editable online workspace hosted by GitHub Pages with Supabase Auth and PostgreSQL. See [Supabase migration and deployment](docs/supabase-migration.md) for setup, validation, original SQLite data import, and current deployment status. The local SQLite workflow below remains available.
+
 One local SQLite database holds all ontology objects. Projects are saved selections of those objects, with their own assessments, scoped relationships, and view settings. A new database starts empty. **No Firebase, Firestore, or browser data is migrated.** Existing remote Firebase data is not changed or deleted.
 
 ## Start

@@ -1,0 +1,5 @@
+project_id = "ahzpuefosoajwwgbfhng"
+
+[functions.ontology]
+verify_jwt = false
+# The function validates each bearer token with Supabase Auth before touching data.
