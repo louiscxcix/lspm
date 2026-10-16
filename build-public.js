@@ -4,6 +4,8 @@ const {openStore}=require('./local-store');
 const out=path.join(__dirname,'public-build');fs.mkdirSync(out,{recursive:true});
 const files=['index.html','styles.css','app.js','ontology-model.js','projects.js','import-resolver.js','ingestion.js','workflow.js','production-logs.js','analysis-views.js','apqp.js','local-api.js'];
 for(const file of files)fs.copyFileSync(path.join(__dirname,file),path.join(out,file));
+// Publish the standalone operational guide alongside the read-only workspace.
+fs.copyFileSync(path.join(__dirname,'docs','sin-lote-guide.html'),path.join(out,'sin-lote-guide.html'));
 const db=openStore(process.env.PM_DB_PATH||path.join(__dirname,'..','.local-data','ontology.sqlite'));
 try {
   const workspace=db.load();workspace.pendingChange=null;
