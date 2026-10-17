@@ -1,5 +1,29 @@
 # Firebase data transfer and ongoing Kakao publication
 
+## Verified transfer status
+
+The fixed-time export from **2026-10-16 20:38:57 (Mexico City)** was imported and
+independently verified in [workflow run 39073655742](https://github.com/louiscxcix/lspm/actions/runs/39073655742).
+All 2,449 documents passed their SHA-256 checks. All 467 application candidates
+matched their stored rows, with no missing rows, unexplained differences or
+preserved conflicts. An unchanged rerun confirmed idempotency, and the original
+local publisher capability was registered without publishing its credential.
+
+The owner workspace advanced to revision 339: 7 projects, 1,715 entities, 4,141
+relations and 853 retained sources. Three Progress snapshots contain 234 count
+rows; two checksheet versions project to one current checksheet. All 383 current
+History event IDs exist in the application tables, and the legacy attachment's
+bytes match its original Firestore chunks. Earlier seed variants and legacy
+projects remain recoverable in the restricted original-document archive.
+
+Actual browser verification opened the migrated Progress and preparation screens
+without login, checked their saved records and read-only controls, and reported
+zero browser errors. Authenticated save/reload was verified separately with a
+temporary isolated account, then the account and its records were removed.
+Database size after transfer was about 67 MB, within the current free-plan
+storage allowance. This verifies the captured export; later Firebase writes need
+a new export rather than an assumption that Firebase and Supabase still sync.
+
 ## Sources and destination
 
 The operational destination is Supabase project `ahzpuefosoajwwgbfhng`. Keep the existing owner workspace and all online edits. Firebase project `ontho-166a6` remains a retained source; this migration does not delete its records or change its passwords.
