@@ -88,3 +88,28 @@ The pre-existing `node test.js` CSS version assertion failure is separate from t
 Ontology rows, history and retained source bytes currently live in PostgreSQL, so they count toward the 500 MB database quota. This migration preserves the existing source-byte behavior; it does not yet move documents to Supabase Storage. Use modest uploads and monitor database size. Moving large documents to private Storage is a future improvement. The backend still loads complete workspaces and records row diffs for change review, so large datasets increase memory and bandwidth use. Edge Functions have a 256 MB memory limit and limited CPU time; large XLSX workbooks need a representative live test before relying on them operationally. The existing 10 MB upload limit is not a guarantee every workbook fits those compute limits.
 
 Free projects can pause for low activity. Maintain independent database and source-file backups. Use a paid plan if continuous factory availability is required.
+
+### Latest interface (2026-10-17)
+
+The frontend now uses the latest application source from backup branch commit
+`33130bd4d51bed60b04ff14cdb8d91be9caaae7f`, including project types, improved maps,
+hourly production charts, progress playback and sample preparation checksheets.
+`client-assets.js` is the shared explicit asset list for local serving and Pages.
+Builds never include database backups or retained source files.
+
+Migration `202610170004_latest_production_views.sql` adds owner-protected hourly
+and checksheet tables. Existing workspace rows remain in place; any corresponding
+rows preserved in the committed recovery archive are copied forward without
+replacement. New reads use a separate allowlisted public RPC; source payloads and
+private checksheet references are excluded. Authenticated production writes share
+the SQLite/PostgreSQL store implementation and revision checks.
+
+Normal browsing remains public and read only. Use `?edit=1` for the authenticated
+editor. Optional AI features remain unavailable until their server integration is
+configured. Generic History ingestion remains disabled on the hosted interface.
+The latest interface does not fetch additional Firebase-only records.
+
+The release workflow verifies the new backend reads before publishing Pages, then
+opens the actual published site in Chromium to check its UI source marker,
+login-free project listing and nonempty Global Library relationship map. A failed
+browser check fails the workflow even if the Pages publication itself completed.

@@ -61,6 +61,17 @@
   };
   render();
   root.LocalAPI={
+    progressList:project=>request('progress?'+new URLSearchParams({project})),
+    hourlyList:project=>request('hourly?'+new URLSearchParams({project})),
+    samplePreparationList:project=>request('sample-preparation?'+new URLSearchParams({project})),
+    progressSave:input=>request('progress','POST',input),
+    hourlySave:input=>request('hourly','POST',input),
+    hourlyRateSave:input=>request('hourly/rates','POST',input),
+    featureSave:input=>request('features','POST',input),
+    samplePreparationSave:input=>request('sample-preparation','POST',input),
+    historyQuery:input=>request('history/query','POST',input),
+    historyJobs:scope=>request('history/jobs?'+new URLSearchParams({scope})),
+    historyDetail:(id,scope)=>request('history/events/'+encodeURIComponent(id)+'?'+new URLSearchParams({scope})),
     load:()=>request('workspace'),health:()=>request('health'),
     save:(workspace,scope,revision,ingestionCommit=null)=>request('workspace','POST',{workspace,scope,revision,ingestionCommit}),
     changes:(scope,offset=0,date='')=>request('changes?'+new URLSearchParams({scope,offset:String(offset),date})),
@@ -77,4 +88,5 @@
     productionStaffingSave:input=>request('production-staffing','POST',input),
     exportBackup:async()=>{const result=await request('export');const url=URL.createObjectURL(new Blob([JSON.stringify(result)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='pm-process-twin-backup.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   };
+  const exportButton=document.createElement('button');exportButton.id='exportButton';exportButton.className='button';exportButton.textContent='Export all data';exportButton.onclick=()=>root.LocalAPI.exportBackup();panel.querySelector('#cloudSignedIn').append(exportButton);
 })(window);

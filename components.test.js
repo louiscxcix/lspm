@@ -125,7 +125,7 @@ test('production UI exposes material classification, quantity entry, and indepen
   assert.match(html,/id="productionSeeMachines"/);
   assert.match(html,/id="productionSeeComponents"/);
   assert.match(app,/id="productionLine"/);
-  assert.match(app,/Flow\.productionContextLayout\(store,projection/);
+  assert.match(app,/Flow\.productionContextLayout\(store,shown/);
   assert.match(app,/layout\.satellites/);
 });
 

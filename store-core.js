@@ -8,7 +8,7 @@ const Model = require('./ontology-model.js');
 const Ingest = require('./ingestion.js');
 const ASSESSMENT_FIELDS = new Set(['power', 'influence', 'currentRole', 'desiredRole', 'currentEngagement', 'desiredEngagement', 'assessmentNote', 'assessedOn']);
 const PROJECT_SCHEDULE_FIELDS = new Set(['status', ...Model.DATE_FIELDS.filter((field) => field !== 'assessedOn')]);
-const CORE_CHANGE_TABLES = { projects: ['id'], entities: ['id'], project_memberships: ['project_id', 'entity_id'], project_assessments: ['project_id', 'entity_id'], project_schedules: ['project_id', 'entity_id'], project_workstreams: ['project_id', 'entity_id', 'code'], relations: ['id'], entity_changes: ['id'], ingestion_jobs: ['id'] };
+const CORE_CHANGE_TABLES = {wip_snapshots:['id'],wip_counts:['id'],hourly_records:['id'], sample_preparation_records:['id'], project_view_settings:['project_id','view_key'],  projects: ['id'], entities: ['id'], project_memberships: ['project_id', 'entity_id'], project_assessments: ['project_id', 'entity_id'], project_schedules: ['project_id', 'entity_id'], project_workstreams: ['project_id', 'entity_id', 'code'], relations: ['id'], entity_changes: ['id'], ingestion_jobs: ['id'] };
 const CHANGE_TABLES = { ...CORE_CHANGE_TABLES, wip_snapshots: ['id'], wip_counts: ['id'], staffing_counts: ['id'], production_staffing_counts: ['id'] };
 
 function createStore(db) {
@@ -95,7 +95,7 @@ function createStore(db) {
   }
   function* putSettings(projectId, viewKey, data) {
     if (projectId !== 'library' && !(yield db.prepare('SELECT id FROM projects WHERE id=?').get(projectId))) throw Error('Unknown project.');
-    if (!['overview', 'production', 'stakeholders', 'library', ...Model.WORKSTREAMS.map((item) => 'lens-' + item.code)].includes(viewKey) || !data || Array.isArray(data) || typeof data !== 'object') throw Error('Invalid view settings.');
+    if (!['overview', 'production', 'stakeholders', 'library', 'universalGroups','eventHistory','features','hourlyRates', ...Model.WORKSTREAMS.map((item) => 'lens-' + item.code)].includes(viewKey) || !data || (Array.isArray(data)&&viewKey!=='hourlyRates') || typeof data !== 'object') throw Error('Invalid view settings.');
     const value = JSON.stringify(data);
     if (value.length > 16000) throw Error('View settings exceed 16 KB.');
     yield db.prepare('INSERT INTO project_view_settings(project_id,view_key,data_json) VALUES (?,?,?) ON CONFLICT(project_id,view_key) DO UPDATE SET data_json=excluded.data_json').run(projectId, viewKey, value);
@@ -120,6 +120,8 @@ function createStore(db) {
       wipSnapshots: yield* read('SELECT * FROM wip_snapshots ORDER BY rowid'),
       wipCounts: yield* read('SELECT * FROM wip_counts ORDER BY rowid'),
       staffingCounts: yield* read('SELECT * FROM staffing_counts ORDER BY rowid'),
+      hourlyRecords: yield* read('SELECT * FROM hourly_records ORDER BY rowid'),
+      samplePreparationRecords: yield* read('SELECT * FROM sample_preparation_records ORDER BY rowid'),
       productionStaffingCounts: yield* read('SELECT * FROM production_staffing_counts ORDER BY rowid')
     };
   }
@@ -276,10 +278,10 @@ function createStore(db) {
       for (const project of next.projects) {
         if (project.id !== scope && previous.projects.some((p) => p.id === project.id)) continue;
         if (known.has(project.id)) {
-          yield db.prepare('UPDATE projects SET name=?, status=?, updated_at=? WHERE id=?').run(project.name, project.status, project.updatedAt || new Date().toISOString(), project.id);
+          yield db.prepare('UPDATE projects SET name=?, status=?, updated_at=?, project_type=? WHERE id=?').run(project.name, project.status, project.updatedAt || new Date().toISOString(), project.projectType||null, project.id);
         } else {
           const now = new Date().toISOString();
-          yield db.prepare('INSERT INTO projects(id,name,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(project.id, project.name, project.status, project.createdAt || now, project.updatedAt || now);
+          yield db.prepare('INSERT INTO projects(id,name,status,created_at,updated_at,project_type) VALUES (?,?,?,?,?,?)').run(project.id, project.name, project.status, project.createdAt || now, project.updatedAt || now, project.projectType||null);
         }
       }
       if (active) {
@@ -418,7 +420,7 @@ function createStore(db) {
     } catch (error) {yield db.exec('ROLLBACK');throw error;}
     return yield* load();
   }
-  return { load, save, putSettings, exportAll, saveIngestion, listChanges, listWip, saveWip, listStaffing, saveStaffing, listProductionStaffing, saveProductionStaffing, keepChange, revertChange, close: function* () {return yield db.close();} };
+  return { ...require('./production-store')({db,load,read,snapshot,rowDiff,putSettings}), load, save, putSettings, exportAll, saveIngestion, listChanges, listWip, saveWip, listStaffing, saveStaffing, listProductionStaffing, saveProductionStaffing, keepChange, revertChange, close: function* () {return yield db.close();} };
 }
 
 module.exports = { createStore, ASSESSMENT_FIELDS, PROJECT_SCHEDULE_FIELDS };

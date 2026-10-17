@@ -18,6 +18,11 @@ async function verifyBackend({baseUrl='https://ahzpuefosoajwwgbfhng.supabase.co'
         const workspaceResponse=await fetchImpl(baseUrl+'/functions/v1/ontology/api/public/workspace',{headers:{Origin:origin},signal:AbortSignal.timeout(15000)});
         const workspace=await workspaceResponse.json().catch(()=>({}));
         if(workspaceResponse.status!==200||!Array.isArray(workspace.projects)||!Array.isArray(workspace.library?.entities)||!Array.isArray(workspace.library?.relations))throw Error('Public workspace data check failed: HTTP '+workspaceResponse.status+'.');
+        if(workspace.projects[0])for(const route of ['progress','hourly','sample-preparation']){
+          const response=await fetchImpl(baseUrl+'/functions/v1/ontology/api/public/'+route+'?'+new URLSearchParams({project:workspace.projects[0].id}),{headers:{Origin:origin},signal:AbortSignal.timeout(15000)});
+          const value=await response.json().catch(()=>null);
+          if(response.status!==200||(route==='progress'? !Array.isArray(value?.snapshots)||!Array.isArray(value?.rows):!Array.isArray(value)))throw Error('Latest production view '+route+' failed: HTTP '+response.status+'.');
+        }
         const preflight=await fetchImpl(endpoint,{method:'OPTIONS',headers:{Origin:origin,'Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'authorization,apikey,content-type'},signal:AbortSignal.timeout(15000)});
         if(preflight.status!==204||preflight.headers.get('Access-Control-Allow-Origin')!==origin)throw Error('Frontend CORS preflight was rejected.');
         console.log('Public workspace and database reads are ready; private endpoints require authentication.');

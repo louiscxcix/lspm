@@ -1,16 +1,19 @@
 (function (root) {
   const M = typeof module === "object" ? require("./ontology-model.js") : root.OntologyModel;
+  const projectTypes = () => typeof module === "object" ? require("./project-types.js") : root.ProjectTypes;
   const KEY = "pm-process-twin-projects-v2";
   const LEGACY = "pm-process-twin-ontology-v1";
   const copy = value => JSON.parse(JSON.stringify(value));
   const uid = () => "project-" + crypto.randomUUID();
-  function create(name) {
+  function create(name, type) {
     if (typeof name !== "string" || !name.trim() || name.length > 120) throw Error("Project name must contain 1–120 characters.");
-    return { id: uid(), name: name.trim(), status: "active", createdAt: new Date().toISOString(), version: 2, entities: [], relations: [] };
+    if(type!==undefined)projectTypes().validate(type);
+    return { id: uid(), name: name.trim(), ...(type===undefined?{}:{projectType:type}), status: "active", createdAt: new Date().toISOString(), version: 2, entities: [], relations: [] };
   }
   function validate(project) {
     if (!project || project.version !== 2 || typeof project.id !== "string" || !project.id || !["active", "archived"].includes(project.status)) throw Error("Invalid project file.");
     if (typeof project.name !== "string" || !project.name.trim() || project.name.length > 120) throw Error("Invalid project name.");
+    if(project.projectType!==undefined)projectTypes().validate(project.projectType);
     const graph = M.validateStore(project);
     if (graph.entities.some(e => e.type === "Project")) throw Error("Projects belong outside the graph.");
     for (const item of [...graph.entities, ...graph.relations]) {

@@ -85,6 +85,25 @@ test('public workspace is pinned, readable without login, and cannot be changed 
     assert.equal((await request('workspace','POST')).status,401);
     assert.equal((await request('public/export')).status,404);
     response=await request('public/health');assert.deepEqual(await response.json(),{ok:true,readOnly:true});
+    // Latest production tables use the same owner boundary and read-only public RPC.
+    const fresh=await withPostgresStore(client,owner,s=>s.load());fresh.projects[0].projectType='sample';
+    await withPostgresStore(client,owner,s=>s.save(fresh,projectId,fresh.revision));
+    let current=await withPostgresStore(client,owner,s=>s.load());
+    assert.equal(current.projects[0].projectType,'sample');
+    await withPostgresStore(client,owner,s=>s.hourlySave({projectId,revision:current.revision,text:'private raw source',rows:[{measurementKind:'model',partId:part.id,unit:'pcs',start:'2026-10-17T09:00:00-06:00',end:'2026-10-17T10:00:00-06:00',actual:0,target:20}]}));
+    current=await withPostgresStore(client,owner,s=>s.load());
+    const S=require('./sample-preparation');let sheet=S.create(current.projects[0],{partId:part.id,runName:'Cloud trial'});
+    let saved=await withPostgresStore(client,owner,s=>s.samplePreparationSave({projectId,revision:current.revision,sheet}));
+    sheet={...saved.sheet,memo:'Latest version'};
+    saved=await withPostgresStore(client,owner,s=>s.samplePreparationSave({projectId,revision:saved.revision,sheet}));
+    await assert.rejects(withPostgresStore(client,owner,s=>s.samplePreparationSave({projectId,revision:saved.revision,sheet})),/SHEET_VERSION_CONFLICT/);
+    const productionRead=async(operation,id=projectId)=>{await client.query('BEGIN');try{await client.query('SET LOCAL ROLE anon');const out=(await client.query('SELECT public.pm_public_production_read($1,$2) AS value',[operation,id])).rows[0].value;await client.query('COMMIT');return out;}catch(e){await client.query('ROLLBACK');throw e;}};
+    const hourly=await productionRead('hourly');assert.equal(hourly.length,1);assert.equal(hourly[0].actual,0);assert.equal(hourly[0].sourceId,undefined);
+    const sheets=await productionRead('sample-preparation');assert.equal(sheets.length,1);assert.equal(sheets[0].version,2);assert.deepEqual(sheets[0],S.sanitize(saved.sheet));
+    const progress=await productionRead('progress');assert.equal(progress.rows[0].quantity,0);assert.deepEqual(progress,await withPostgresStore(client,owner,s=>s.listProgress(projectId)));
+    await assert.rejects(productionRead('hourly',hidden.projects[0].id),/Unknown project/);
+    await assert.rejects(productionRead('export'),/Unsupported public operation/);
+    await assert.rejects(withPostgresStore(client,other,s=>s.hourlySave({projectId,revision:1,rows:[]})),/Unknown project|STALE_REVISION/);
     await assert.rejects(withPublicPostgresStore(client,s=>s.putSettings('library','library',{zoom:2})),/read.only transaction/);
   }finally{if(client)await client.end();await admin.query('DROP DATABASE IF EXISTS '+dbName);await admin.end();}
 });

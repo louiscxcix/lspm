@@ -27,7 +27,7 @@ function createCloudHandler({authenticate,withStore,withPublicStore,allowedOrigi
       if(request.method!=='GET')return respond(405,{error:'Public workspace is read-only.'});
       if(!withPublicStore)return respond(503,{error:'Public workspace is not configured.'});
       const route=pathname.slice('/api/public/'.length);
-      if(!['health','workspace','wip','staffing','production-staffing'].includes(route))return respond(404,{error:'Not found.'});
+      if(!['health','workspace','wip','staffing','production-staffing','progress','hourly','sample-preparation'].includes(route))return respond(404,{error:'Not found.'});
       try{return await withPublicStore(async store=>{
         if(route==='health'){if(store.health)await store.health();else await store.load();return respond(200,{ok:true,readOnly:true});}
         if(route==='workspace'){
@@ -46,6 +46,9 @@ function createCloudHandler({authenticate,withStore,withPublicStore,allowedOrigi
         const project=url.searchParams.get('project')||'';
         if(route==='wip')return respond(200,await store.listWip(project,url.searchParams.get('snapshot')||''));
         if(route==='staffing')return respond(200,await store.listStaffing(project));
+        if(route==='progress')return respond(200,await store.listProgress(project));
+        if(route==='hourly')return respond(200,(await store.listHourly(project)).map(({sourceId,...row})=>row));
+        if(route==='sample-preparation')return respond(200,(await store.samplePreparationList(project)).map(require('./sample-preparation').sanitize));
         return respond(200,await store.listProductionStaffing(project));
       });}catch(error){
         const candidate=String(error.code||'PUBLIC_READ_FAILED');

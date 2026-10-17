@@ -20,7 +20,7 @@ test('verified encrypted database restores atomically, preserves extra rows, and
   M.addRelation(ws.library,{type:'operated_in',from:step.id,to:machine.id});M.addRelation(ws.library,{type:'applies_to',from:step.id,to:part.id});M.addRelation(ws.library,{type:'supported_by',from:part.id,to:secret.id});
   ws=store.save(ws,'library',ws.revision);P.attachMembers(ws.projects[0],ws.library,[part.id,machine.id,step.id,secret.id]);ws=store.save(ws,ws.projects[0].id,ws.revision);store.close();
   const sqlite=new DatabaseSync(file),sourceBytes=Buffer.from("Original bytes ' ; DROP TABLE entities; --\u0000",'utf8');
-  sqlite.exec("ALTER TABLE projects ADD COLUMN project_type TEXT; UPDATE projects SET project_type='program'; ALTER TABLE sources ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'; CREATE TABLE extra_history(id TEXT PRIMARY KEY,data_json TEXT); INSERT INTO extra_history VALUES('retained-extra','{\"preserved\":true}'); UPDATE meta SET value='5' WHERE key='schema_version'");
+  sqlite.exec("UPDATE projects SET project_type='program'; ALTER TABLE sources ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'; CREATE TABLE extra_history(id TEXT PRIMARY KEY,data_json TEXT); INSERT INTO extra_history VALUES('retained-extra','{\"preserved\":true}'); UPDATE meta SET value='5' WHERE key='schema_version'");
   sqlite.prepare('INSERT INTO sources(id,kind,filename,mime_type,content,created_at,metadata_json) VALUES(?,?,?,?,?,?,?)').run('original-source','history',"original's file.txt",'text/plain',sourceBytes,'2026-10-16T20:00:00Z','{"original":true}');
   sqlite.close();
   const hash=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex'),key='test-key-only';

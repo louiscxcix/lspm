@@ -36,6 +36,9 @@ function openStore(dbPath) {
     UPDATE meta SET value='3' WHERE key='schema_version' AND value='2';
     UPDATE meta SET value='4' WHERE key='schema_version' AND value='3';
   `);
+  if(!db.prepare('PRAGMA table_info(projects)').all().some(c=>c.name==='project_type'))db.exec('ALTER TABLE projects ADD COLUMN project_type TEXT');
+  db.exec(`CREATE TABLE IF NOT EXISTS hourly_records(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),data_json TEXT NOT NULL,recorded_at TEXT NOT NULL,revision INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS sample_preparation_records(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),sheet_id TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>0),data_json TEXT NOT NULL,recorded_at TEXT NOT NULL,revision INTEGER NOT NULL,UNIQUE(project_id,sheet_id,version));`);
   if(Number(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value)>4)throw Error('Database was created by a newer app version.');
   const methods=createStore(db);
   return Object.fromEntries(Object.entries(methods).map(([name,method])=>[name,(...args)=>{

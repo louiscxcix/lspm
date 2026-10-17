@@ -7,7 +7,7 @@ const Ingest = require('./ingestion.js');
 const Model = require('./ontology-model.js');
 const WIP = require('./wip.js');
 
-const ASSETS = new Set(['index.html', 'styles.css', 'ontology-model.js', 'history.js', 'projects.js', 'import-resolver.js', 'ingestion.js', 'workflow.js', 'production-logs.js', 'analysis-views.js', 'apqp.js', 'local-api.js', 'supabase-public-api.js', 'supabase-api.js', 'supabase-config.js', 'app.js']);
+const ASSETS = new Set(require('./client-assets'));
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
 const EXTRACTION_SCHEMA = {
   type: 'object', properties: {
@@ -46,6 +46,12 @@ function createRequestHandler({ store, geminiKey = '', geminiFetch = globalThis.
     try {
       if (req.method === 'GET' && pathname === '/api/health') {json(res, 200, { ok: true, aiConfigured: Boolean(geminiKey) });return;}
       if (req.method === 'GET' && pathname === '/api/workspace') {json(res, 200, await store.load());return;}
+      const productionReads={'/api/progress':'listProgress','/api/hourly':'listHourly','/api/sample-preparation':'samplePreparationList'};
+      if(req.method==='GET'&&productionReads[pathname]){json(res,200,await store[productionReads[pathname]](url.searchParams.get('project')||''));return;}
+      const productionWrites={'/api/progress':'saveProgress','/api/hourly':'hourlySave','/api/hourly/rates':'hourlyRateSave','/api/features':'featureSave','/api/sample-preparation':'samplePreparationSave','/api/history/query':'historyList'};
+      if(req.method==='POST'&&productionWrites[pathname]){json(res,200,await store[productionWrites[pathname]](await readJson(req)));return;}
+      if(req.method==='GET'&&pathname==='/api/history/jobs'){json(res,200,await store.historyJobs(url.searchParams.get('scope')||'library'));return;}
+      if(req.method==='GET'&&pathname.startsWith('/api/history/events/')){json(res,200,await store.historyDetail(decodeURIComponent(pathname.slice('/api/history/events/'.length)),url.searchParams.get('scope')||'library'));return;}
       if (req.method === 'GET' && pathname === '/api/wip') {
         json(res, 200, await store.listWip(url.searchParams.get('project') || '', url.searchParams.get('snapshot') || ''));return;
       }
@@ -98,7 +104,7 @@ function createRequestHandler({ store, geminiKey = '', geminiFetch = globalThis.
       if (req.method === 'POST' && changeRoute) {
         json(res, 200, changeRoute[2] === 'keep' ? await store.keepChange(changeRoute[1]) : await store.revertChange(changeRoute[1], (await readJson(req)).revision));return;
       }
-      const settingsRoute = pathname.match(/^\/api\/settings\/([A-Za-z0-9_-]+)\/(overview|production|stakeholders|library|lens-(?:commercial|engineering|purchasing|production|quality|logistics))$/);
+      const settingsRoute = pathname.match(/^\/api\/settings\/([A-Za-z0-9_-]+)\/(overview|production|stakeholders|library|universalGroups|eventHistory|lens-(?:commercial|engineering|purchasing|production|quality|logistics))$/);
       if (req.method === 'PUT' && settingsRoute) {
         json(res, 200, await store.putSettings(settingsRoute[1], settingsRoute[2], await readJson(req)));return;
       }

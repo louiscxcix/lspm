@@ -1,10 +1,33 @@
 const Model = window.OntologyModel, Projects = window.ProjectStore, Flow = window.PMWorkflow, Analysis = window.AnalysisViews, APQP = window.APQP, LocalAPI = window.LocalAPI;
 const Ingest = window.Ingestion, Logs = window.ProductionLogs;
+let basicAccess=false;
+let historyGroups={};
+const eventHistoryUI=new window.HistoryView(async()=>{const id=store?.id;workspace=await LocalAPI.load();store=id==='library'?workspace.library:workspace.projects.find(p=>p.id===id)||null;render();});
+const progressUI=new window.ProgressView(()=>{if(progressUI.active)hourlyUI.active=false;render();},async(next)=>{const id=store?.id;workspace=next||await LocalAPI.load();store=workspace.projects.find(p=>p.id===id)||null;render();});
+const hourlyUI=new window.HourlyView(()=>{if(hourlyUI.active){progressUI.active=false;progressUI.stop();}render();},async()=>{const id=store?.id;workspace=await LocalAPI.load();store=workspace.projects.find(p=>p.id===id)||null;render();});
+const samplePreparationUI=new window.SamplePreparationView(async result=>{const id=store?.id;workspace=result?.workspace||await LocalAPI.load();store=workspace.projects.find(p=>p.id===id)||null;render();});
 const $ = selector => document.querySelector(selector);
+$('#projectName').closest('label').insertAdjacentHTML('afterend','<label>Project type<select id="newProjectType">'+window.ProjectTypes.TYPES.map(t=>'<option value="'+t.id+'"'+(t.id==='sample'?' selected':'')+'>'+t.label+'</option>').join('')+'</select></label>');
+$('#projectList').insertAdjacentHTML('beforebegin','<label class="project-type-filter">Project type<select id="projectTypeFilter"><option value="">All types</option>'+window.ProjectTypes.TYPES.map(t=>'<option value="'+t.id+'">'+t.label+'</option>').join('')+'</select></label>');
+$('#projectTypeFilter').onchange=()=>render();
+$('#recordsView').insertAdjacentHTML('afterbegin','<nav id="sampleRiskTabs" class="sample-risk-tabs" hidden><button class="button" data-sample-risk="risks">Risk / Issues</button><button class="button" data-sample-risk="preparation">Sample Preparation Checksheet</button></nav><div id="samplePreparationPanel" hidden></div>');
+let sampleRiskMode='risks',routeSerial=0;
+$('#sampleRiskTabs').onclick=e=>{const mode=e.target.closest('[data-sample-risk]')?.dataset.sampleRisk;if(mode){sampleRiskMode=mode;render();}};
+const projectTypeButton=document.createElement('button');projectTypeButton.id='editProjectType';projectTypeButton.className='button';projectTypeButton.textContent='Project type';$('#projectBar').append(projectTypeButton);
+projectTypeButton.onclick=()=>{if(!store||store.id==='library'||window.PUBLIC_READ_ONLY)return;const d=document.createElement('dialog');d.className='dialog';d.innerHTML='<form><h2>Project type</h2><label>Type<select>'+window.ProjectTypes.TYPES.map(t=>'<option value="'+t.id+'"'+(window.ProjectTypes.kind(store)===t.id?' selected':'')+'>'+t.label+'</option>').join('')+'</select></label><p>Classification does not change passwords or access.</p><p role="alert"></p><button class="button primary" type="submit">Save type</button><button class="button" type="button" data-close>Cancel</button></form>';document.body.append(d);d.onclose=()=>d.remove();d.querySelector('[data-close]').onclick=()=>d.close();d.querySelector('form').onsubmit=async e=>{e.preventDefault();const b=d.querySelector('[type="submit"]');b.disabled=true;try{const value=d.querySelector('select').value;if(LocalAPI.projectTypeSave){workspace=await LocalAPI.projectTypeSave({projectId:store.id,projectType:value,revision:workspace.revision});store=workspace.projects.find(p=>p.id===store.id);}else await changeProject(p=>{p.projectType=value;});d.close();render();}catch(err){d.querySelector('[role="alert"]').textContent=err.message;b.disabled=false;}};d.showModal();};
+$('#renameProject').insertAdjacentHTML('afterend','<button id="projectFeatures" class="button" type="button">프로젝트 기능</button>');
+$('#projectFeatures').onclick=()=>{
+ const settings=workspace.viewSettings?.[store.id]?.features||window.HourlyProduction.defaults(store),d=document.createElement('dialog');d.className='dialog';
+ d.innerHTML='<h2>프로젝트 기능 · '+h(store.name)+'</h2><label class="check"><input type="checkbox" data-wip '+(settings.wip?'checked':'')+'> Progress · WIP</label><label class="check"><input type="checkbox" data-hourly '+(settings.hourly?'checked':'')+'> 시간별 생산량 · 목표·실적·미달 사유</label><p>기능을 꺼도 기존 기록은 삭제하지 않습니다. 입력 구조는 다음 단계에서 추가합니다.</p><p data-error role="alert"></p><div class="actions"><button class="button" data-close>닫기</button><button class="button primary" data-save>기능 저장</button></div>';
+ document.body.append(d);d.onclose=()=>d.remove();d.querySelector('[data-close]').onclick=()=>d.close();d.querySelector('[data-save]').onclick=async e=>{e.target.disabled=true;try{await LocalAPI.featureSave({projectId:store.id,revision:workspace.revision,features:{wip:d.querySelector('[data-wip]').checked,hourly:d.querySelector('[data-hourly]').checked}});d.close();await hourlyUI.refreshApp();}catch(err){d.querySelector('[data-error]').textContent=err.message;e.target.disabled=false;}};d.showModal();
+};
+$('#recordsView').insertAdjacentHTML('afterend','<section id="copilotView" class="copilot-view" hidden><div class="panel-heading"><div><h1>Copilot</h1><p id="copilotStatus" class="muted"></p></div><button id="copilotClear" class="button" type="button">대화 지우기</button></div><div class="copilot-body"><div id="copilotMessages" class="copilot-messages" role="log" aria-label="Copilot conversation" aria-live="polite"></div><p id="copilotError" class="form-error" role="alert"></p><form id="copilotForm"><textarea id="copilotQuestion" rows="3" maxlength="4000" required aria-label="질문" placeholder="G65 Integration에 어떤 Risk가 있어?"></textarea><div class="actions"><button id="copilotSend" class="button primary" type="submit">보내기</button><span class="muted">보내면 질문·최근 대화·프로젝트 데이터가 OpenAI로 전송됩니다.</span></div></form></div></section>');
+$('#projectEntry .entry-footer').insertAdjacentHTML('afterbegin','<button id="entryCopilot" class="button" type="button">Copilot</button>');
 $('#processFields').before($('#productionEntityFields').content);
 $('#dateFields').before($('#productionEventFields').content);
 $('#wipView').after($('#productionLogView').content);
 $('#partFields').append($('#partClassificationFields').content);
+$('#partFields .form-grid').insertAdjacentHTML('beforeend','<label>모델 코드<input id="modelCode" maxlength="120"></label><label>코드 출처<input id="codeNamespace" maxlength="120" placeholder="LS MES"></label>');
 $('#relationEvidence').closest('label').after($('#materialRelationFields').content);
 $('#entityName').parentElement.after($('#workstreamFields').content);
 $('#entityError').insertAdjacentHTML('beforebegin','<label id="entityMatchReview" class="entity-match-review" hidden>Same-name object exists in Library · choose explicitly<select id="entityMatchChoice"><option value="">Choose reuse or separate</option></select></label>');
@@ -15,26 +38,108 @@ for(const id of ['showNumbers','productionNumbers'])$('#'+id).add(new Option('Pe
 $('#addProductionExcel').insertAdjacentHTML('afterend','<button id="addProductionLogs" type="button" class="button">Add process logs</button>');
 $('#productionTabs [data-production-view="APQP & gates"]').insertAdjacentHTML('beforebegin','<button data-production-view="Process logs">Process logs</button>');
 $('#mapPartMulti').insertAdjacentHTML('afterend','<label id="mapHighlightControl" hidden>Highlight Part<select id="mapHighlight"><option value="">All selected Parts</option></select></label>');
+$('#mapPartMulti').insertAdjacentHTML('beforebegin','<label id="mapProductionLineControl" hidden>Production line<select id="mapProductionLine"><option value="">All lines</option><option value="LDM">LDM</option><option value="Nexlide">Nexlide</option><option value="TEM">TEM</option><option value="SMT">SMT</option></select></label>');
+$('#lensHeader').append($('#mapProductionLineControl'));
+$('#productionView .production-legend').insertAdjacentHTML('beforeend','<button id="productionClearSelection" class="text-button">Clear selection</button>');
 $('#mapHighlightControl').insertAdjacentHTML('afterend','<div id="mapContextControls" class="map-context-controls"><label class="check production-context-toggle"><input id="mapSeeMachines" type="checkbox" checked>See Machines</label><label class="check production-context-toggle"><input id="mapSeeComponents" type="checkbox" checked>See Components</label></div>');
 $('#productionPartMulti').insertAdjacentHTML('afterend','<label>Highlight Part<select id="productionHighlight"><option value="">All selected Parts</option></select></label>');
 $('#productionHighlight').closest('label').after($('#productionContextControls').content);
 $('#productionFit').textContent='Fit';
+$('#mapContextControls').insertAdjacentHTML('beforeend','<label class="check production-context-toggle"><input id="mapSeeStakeholders" type="checkbox" checked>See Stakeholders · line only</label>');
+$('#productionSeeMachines').closest('label').insertAdjacentHTML('afterend','<label class="check production-context-toggle"><input id="productionSeeStakeholders" type="checkbox" checked>See Stakeholders · line only</label>');
+for(const id of ['mapSeeStakeholders','productionSeeStakeholders'])$('#'+id).addEventListener('change',()=>render());
+const fullscreenZoomBefore=new WeakMap();
+const fullscreenMaps=[];
+let fullscreenMap=null,fullscreenRequest=null,fullscreenEscapeUntil=0;
+const mapFullscreenContext=()=>[store?.id,location.hash,selectedWorkstream].join('|');
+function syncMapFullscreen(next,message=''){
+  const previous=fullscreenMap;
+  if(previous&&previous!==next){
+    for(const {node,marker} of previous.borrowed||[])marker.replaceWith(node);
+    previous.borrowed=[];
+    previous.panel.classList.remove('map-fullscreen');
+    const before=fullscreenZoomBefore.get(previous.panel);
+    if(before?.context===mapFullscreenContext()){
+      if(previous.kind==='production'){productionZoom=before.zoom;applyProductionZoom();}
+      else{zoom=before.zoom;applyZoom();}
+    }
+    fullscreenZoomBefore.delete(previous.panel);
+  }
+  fullscreenMap=next;
+  if(next&&next!==previous){
+    next.borrowed=[];
+    const line=next.kind==='overview'&&!$('#mapProductionLineControl').hidden?$('#mapProductionLineControl'):null;
+    for(const [node,target] of [[$('#inspector'),next.panel],[line,next.panel.querySelector('.map-controls')]]){
+      if(!node||next.panel.contains(node))continue;
+      const marker=document.createComment('Map fullscreen position');node.before(marker);
+      if(node===line)target.prepend(node);else target.append(node);
+      next.borrowed.push({node,marker});
+    }
+  }
+  document.body.classList.toggle('map-fullscreen-open',Boolean(next));
+  for(const entry of fullscreenMaps){
+    const open=entry===next;
+    entry.panel.classList.toggle('map-fullscreen',open);
+    entry.button.textContent=open?(document.fullscreenElement===entry.panel?'Exit full screen':'Exit expanded view'):'Full screen';
+    entry.button.setAttribute('aria-pressed',String(open));
+    entry.status.textContent=open?message:'';entry.status.hidden=!open||!message;
+  }
+  if(next&&next!==previous)requestAnimationFrame(()=>{if(fullscreenMap===next&&fullscreenZoomBefore.get(next.panel)?.context===mapFullscreenContext())focusMapSelection(next.kind);});
+}
+async function exitMapFullscreen(){
+  if(fullscreenRequest)fullscreenRequest.cancelled=true;
+  if(fullscreenMaps.some(entry=>entry.panel===document.fullscreenElement)){
+    try{await document.exitFullscreen();}
+    catch(error){
+      if(fullscreenMap){fullscreenMap.status.textContent='Could not exit full screen: '+error.message+'. Press Esc to exit.';fullscreenMap.status.hidden=false;}
+    }
+  }else syncMapFullscreen(null);
+}
 for(const [fitId,panelSelector] of [['fitMap','.map-panel'],['productionFit','#productionView']]){
+  const panel=$(panelSelector),kind=panelSelector==='#productionView'?'production':'overview';
   const button=document.createElement('button');button.className='button map-fullscreen-button';button.type='button';button.textContent='Full screen';button.setAttribute('aria-pressed','false');
   $('#'+fitId).parentElement.appendChild(button);
-  button.addEventListener('click',()=>{
-    const panel=$(panelSelector),open=!panel.classList.contains('map-fullscreen');
-    document.querySelectorAll('.map-fullscreen').forEach(el=>el.classList.remove('map-fullscreen'));
-    panel.classList.toggle('map-fullscreen',open);document.body.classList.toggle('map-fullscreen-open',open);
-    document.querySelectorAll('.map-fullscreen-button').forEach(el=>{el.textContent=el===button&&open?'Exit full screen':'Full screen';el.setAttribute('aria-pressed',String(el===button&&open));});
+  const status=document.createElement('p');status.className='map-fullscreen-status';status.setAttribute('role','status');status.hidden=true;
+  button.parentElement.parentElement.append(status);
+  const entry={panel,button,status,kind};fullscreenMaps.push(entry);
+  button.addEventListener('click',async()=>{
+    if(fullscreenMap===entry){await exitMapFullscreen();return;}
+    if(fullscreenRequest)return;
+    syncMapFullscreen(null);
+    fullscreenZoomBefore.set(panel,{zoom:kind==='production'?productionZoom:zoom,context:mapFullscreenContext()});
+    const request={entry,cancelled:false};fullscreenRequest=request;button.disabled=true;
+    try{
+      if(typeof panel.requestFullscreen!=='function')throw Error('Native fullscreen is not supported by this browser');
+      await panel.requestFullscreen();
+      if(request.cancelled||panel.closest('[hidden]'))await exitMapFullscreen();
+    }catch(error){
+      if(!request.cancelled&&!panel.closest('[hidden]'))syncMapFullscreen(entry,'Full screen unavailable: '+error.message+'. Expanded view fills this browser window. Press Esc or Exit expanded view to close.');
+    }finally{if(fullscreenRequest===request)fullscreenRequest=null;button.disabled=false;}
   });
 }
-document.addEventListener('keydown',event=>{if(event.key==='Escape'){document.querySelector('.map-fullscreen .map-fullscreen-button')?.click();}});
+document.addEventListener('fullscreenchange',()=>{
+  const next=fullscreenMaps.find(entry=>entry.panel===document.fullscreenElement)||null;
+  if(next&&(fullscreenRequest?.cancelled||next.panel.closest('[hidden]'))){exitMapFullscreen();return;}
+  // Browser Escape can deliver its key event after fullscreenchange.
+  if(fullscreenMap&&!next)fullscreenEscapeUntil=performance.now()+250;
+  syncMapFullscreen(next);
+});
+const fullscreenVisibility=new MutationObserver(()=>{
+  const entry=fullscreenMap||fullscreenRequest?.entry;
+  if(entry?.panel.closest('[hidden]'))exitMapFullscreen();
+});
+for(const {panel} of fullscreenMaps)for(let ancestor=panel;ancestor;ancestor=ancestor.parentElement)fullscreenVisibility.observe(ancestor,{attributes:true,attributeFilter:['hidden']});
+window.addEventListener('hashchange',()=>{if(fullscreenMap||fullscreenRequest)exitMapFullscreen();});
+document.addEventListener('keydown',event=>{
+  if(event.key!=='Escape')return;
+  if(fullscreenMap||fullscreenRequest||performance.now()<fullscreenEscapeUntil){event.preventDefault();event.stopImmediatePropagation();exitMapFullscreen();}
+  else if(mapAssistantUI.openPanel)mapAssistantUI.close();
+},true);
 $('#fitMap').insertAdjacentHTML('beforebegin','<span id="mapZoomLevel" class="map-zoom-level" aria-live="polite">100%</span>');
 $('#productionFit').insertAdjacentHTML('beforebegin','<span id="productionZoomLevel" class="map-zoom-level" aria-live="polite">100%</span>');
 $('#mapPartChoices').insertAdjacentHTML('beforebegin','<div class="map-part-actions"><button type="button" data-map-parts-action="all">All</button><button type="button" data-map-parts-action="none">None</button></div>');
 $('#productionPartChoices').insertAdjacentHTML('beforebegin','<div class="map-part-actions"><button type="button" data-production-parts-action="all">All</button><button type="button" data-production-parts-action="none">None</button></div>');
-$('.production-legend span:last-child').textContent='Dashed card: order unconfirmed · labels are not live machine inventory.';
+$('.production-legend span:last-of-type').textContent='Click chips to select multiple objects; click again to deselect. ? opens details. Dashed card: order unconfirmed.';
 const h = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
 const allTypes = Model.ENTITY_TYPES.filter(t => t !== 'Project');
 const presets = {process:['Work Item','Production Step','Part','Part Revision','Gate','Deliverable','Build','Event','Decision'], stakeholders:['Person','Organization','Assignment','Part','Part Revision','Work Item'], all:allTypes};
@@ -45,6 +150,9 @@ const tabTypes = {
 };
 const tabs = ['Overview',...Object.keys(tabTypes),'Input','History'];
 let workspace = null, store = null, startupError = '', selectedId = null, activeTab = 'Overview', types = new Set(presets.process);
+const mapSelectedIds=new Set();
+const qualityExpanded=new Set();
+let mapSelectionContext='';
 let selectedWorkstream = '', historyRows = [], historyMore = false, historyOffset = 0;
 let editingId = null, preview = null, csvChoices = {}, zoom = 1, graphSize = {width:550,height:400}, toastTimer;
 let productionZoom = 1, productionSize = {width:560,height:330}, mapPartId = '', mapPartIds = [], productionPartIds = [], mapPartsCustomized = false, productionPartsCustomized = false, mapHighlightPartId = '', productionHighlightPartId = '';
@@ -57,6 +165,9 @@ let preferredStakeholderDepartment = '';
 const viewTimers = new Map();
 let inputMode = 'single';
 let aiConfigured = false;
+let copilotConfigured=false,copilotModel='';
+let mapAssistantConfigured=false;
+const copilotChats=new Map();
 let ingestionDraft = null, ingestionSource = null, ingestionJobId = null;
 let ingestionSelection = null, ingestionConfirm = false;
 let wipData = null, wipHistoryData = null, wipDraft = null, wipFile = null, staffingData = [], productionStaffingData = [], selectedWipSnapshotId = '', wipPartMappings = {}, wipStepMappings = {};
@@ -67,6 +178,7 @@ const stakeholderViews = ['People & roles','Power / influence','Engagement'];
 const apqpViews = ['Phase dashboard','Gate reviews','Part readiness','Traceability'];
 const profileFields = ['title','power','influence','currentRole','desiredRole','currentEngagement','desiredEngagement','assessmentNote','assessedOn'];
 let month = new Date(new Date().getFullYear(),new Date().getMonth(),1);
+let metricLoadSerial=0;
 const dateLabel = key => key.replace(/([A-Z])/g,' $1').replace(/^./,c=>c.toUpperCase());
 const iso = date => date.getFullYear() + '-' + String(date.getMonth()+1).padStart(2,'0') + '-' + String(date.getDate()).padStart(2,'0');
 const short = (text,n=29) => text.length > n ? text.slice(0,n-1)+'…' : text;
@@ -97,8 +209,10 @@ async function startLocal() {
     startupError='This version is local only. Start it with start-local.command, then open http://127.0.0.1:4173/.';render();return;
   }
   try {
-    workspace=await LocalAPI.load();aiConfigured=(await LocalAPI.health()).aiConfigured;startupError='';route();
-  } catch (error) { startupError=/failed to fetch/i.test(error.message)?(window.CLOUD_BACKEND?'Cannot reach your online workspace. Check your connection and try again.':'Local server is offline. Open start-local.command and reload this page.'):(window.CLOUD_BACKEND?'Workspace: ':'Local database error: ')+error.message;render(); }
+    $('#projectList').innerHTML='<p class="muted" role="status">프로젝트 불러오는 중…</p>';
+    if(LocalAPI.catalog){workspace=await LocalAPI.catalog();render();}
+    workspace=await LocalAPI.load();basicAccess=workspace.access?.mode==='basic';window.OwnerAccess?.init(workspace.access,{whole:openWholeProcess,production:()=>openWorkstream('production')});const health=await LocalAPI.health();aiConfigured=health.aiConfigured;mapAssistantConfigured=Boolean(health.mapAssistantConfigured);copilotConfigured=Boolean(health.copilotConfigured);copilotModel=health.copilotModel||'';startupError='';route();
+  } catch (error) { startupError=/failed to fetch/i.test(error.message)?'Local server is offline. Open start-local.command and reload this page.':'Local database error: '+error.message;render(); }
 }
 function invalidatePreview() { preview = null; $('#applyCSV').disabled = true; }
 function setInputMode(mode) {
@@ -115,12 +229,13 @@ const mapViewKey=()=>selectedWorkstream?'lens-'+selectedWorkstream:'overview';
 function viewSnapshot(key) {
   if(key==='production')return {line:$('#productionLine').value,selections:{...productionSelections,[$('#productionLine').value||'all']:{partIds:[...productionPartIds],partSelectionCustomized:productionPartsCustomized,highlightPartId:productionHighlightPartId}},partIds:[...productionPartIds],partSelectionCustomized:productionPartsCustomized,highlightPartId:productionHighlightPartId,numbers:$('#productionNumbers').value,machines:$('#productionSeeMachines').checked,components:$('#productionSeeComponents').checked,snapshotId:selectedWipSnapshotId,zoom:productionZoom};
   if(key==='stakeholders')return {view:stakeholderView,area:$('#stakeholderArea').value,department:$('#stakeholderDepartment').value,grouping:$('#stakeholderGrouping').value,openGroups:[...openStakeholderGroups]};
-  return {dateStart:$('#dateStart').value,dateEnd:$('#dateEnd').value,search:$('#searchInput').value,status:$('#statusFilter').value,focus:$('#focusMode').value,perspective:$('#perspective').value,partIds:key==='lens-production'?[...mapPartIds]:[],partSelectionCustomized:key==='lens-production'&&mapPartsCustomized,highlightPartId:key==='lens-production'?mapHighlightPartId:'',numbers:$('#showNumbers').value,machines:$('#mapSeeMachines').checked,components:$('#mapSeeComponents').checked,keepPredecessors:$('#keepPredecessors').checked,showSubprocesses:$('#showSubprocesses').checked,types:[...types],zoom,month:iso(month),ganttScale:$('#ganttScale').value,scheduleMode:$('#scheduleMode').value};
+  return {line:$('#mapProductionLine').value,dateStart:$('#dateStart').value,dateEnd:$('#dateEnd').value,search:$('#searchInput').value,status:$('#statusFilter').value,focus:$('#focusMode').value,perspective:$('#perspective').value,partIds:[...mapPartIds],partSelectionCustomized:mapPartsCustomized,highlightPartId:key==='lens-production'?mapHighlightPartId:'',numbers:$('#showNumbers').value,machines:$('#mapSeeMachines').checked,components:$('#mapSeeComponents').checked,keepPredecessors:$('#keepPredecessors').checked,showSubprocesses:$('#showSubprocesses').checked,types:[...types],zoom,month:iso(month),ganttScale:$('#ganttScale').value,scheduleMode:$('#scheduleMode').value};
 }
 function saveViewSettings(key,delay=180) {
   if(!store||!workspace)return;
+  if(basicAccess){sessionStorage.setItem('pm-basic-view:'+key,JSON.stringify(viewSnapshot(key)));return;}
   const projectId=store.id,viewKey=projectId==='library'&&key==='overview'?'library':key;
-  const data=viewSnapshot(key);
+  const data={...workspace.viewSettings?.[projectId]?.[viewKey],...viewSnapshot(key)};
   (workspace.viewSettings[projectId] ||= {})[viewKey]=data;
   clearTimeout(viewTimers.get(projectId+':'+viewKey));
   viewTimers.set(projectId+':'+viewKey,setTimeout(async ()=>{
@@ -130,10 +245,11 @@ function saveViewSettings(key,delay=180) {
 }
 function restoreMapSettings(key) {
   const overview=workspace.viewSettings?.[store.id]?.[key]||{};
-  const validPart=id=>store.entities.some(e=>e.id===id&&['Part','Part Revision'].includes(e.type)&&(key!=='lens-production'||Model.isProductPart(e)));
-  const allParts=store.entities.filter(e=>['Part','Part Revision'].includes(e.type)&&(key!=='lens-production'||Model.isProductPart(e))).map(e=>e.id);
-  mapPartsCustomized=key==='lens-production'&&overview.partSelectionCustomized===true;
-  mapPartIds=key==='lens-production'?(mapPartsCustomized&&Array.isArray(overview.partIds)?overview.partIds:allParts).filter((id,index,all)=>validPart(id)&&all.indexOf(id)===index):[];
+  if(key==='lens-production')$('#mapProductionLine').value=['','LDM','Nexlide','TEM','SMT'].includes(overview.line)?overview.line:store.entities.some(e=>e.productionFamily==='LDM')?'LDM':'';
+  const validPart=id=>store.entities.some(e=>e.id===id&&Model.isProductPart(e));
+  const allParts=store.entities.filter(Model.isProductPart).map(e=>e.id);
+  mapPartsCustomized=overview.partSelectionCustomized===true;
+  mapPartIds=(mapPartsCustomized&&Array.isArray(overview.partIds)?overview.partIds:allParts).filter((id,index,all)=>validPart(id)&&all.indexOf(id)===index);
   mapPartId=mapPartIds.includes(overview.partId)?overview.partId:mapPartIds[0]||'';
   mapHighlightPartId=mapPartIds.includes(overview.highlightPartId)?overview.highlightPartId:'';
   $('#showNumbers').value=['none','parts','workers','pending'].includes(overview.numbers)?overview.numbers:'none';
@@ -172,9 +288,23 @@ function restoreViewSettings() {
   openStakeholderGroups.clear();for(const id of stakeholders.openGroups||[])openStakeholderGroups.add(id);
   stakeholderGroupsInitialized=Array.isArray(stakeholders.openGroups);
 }
-function route() {
+async function route() {
+  const serial=++routeSerial;
+  metricLoadSerial++;
+  qualityExpanded.clear();
+  if(!location.hash)history.replaceState(null,'','#/projects');
+  const pendingId=location.hash.startsWith('#/projects/')?decodeURIComponent(location.hash.slice(11)):'';
+  if(workspace?.catalogOnly&&location.hash==='#/library'){const loaded=await LocalAPI.load();if(serial!==routeSerial)return;workspace=loaded;}
+  if(LocalAPI.projectOpen&&workspace?.projects.some(p=>p.id===pendingId&&p.viewPending)){
+    $('#projectError').textContent='프로젝트 내용을 불러오는 중…';
+    try{const loaded=await LocalAPI.projectOpen(pendingId);if(serial!==routeSerial)return;workspace=loaded;basicAccess=workspace.access?.mode==='basic';window.OwnerAccess?.init(workspace.access,{whole:openWholeProcess,production:()=>openWorkstream('production')});}
+    catch(e){if(e.message==='PROJECT_PASSWORD_REQUIRED'){projectPasswordDialog(pendingId);return;}$('#projectError').textContent=e.message;return;}
+  }
+  if(basicAccess&&workspace?.access?.projectId&&!['#/projects','#/projects/'+workspace.access.projectId].includes(location.hash))history.replaceState(null,'','#/projects');
+  $('#copilotQuestion').value='';
   logDraft=null;pendingCache=null;$('#logText').value='';$('#logName').value='';$('#logPreview').innerHTML='';$('#logError').textContent='';$('#saveLogs').disabled=true;
   let id=''; try { if(location.hash.startsWith('#/projects/')) id=decodeURIComponent(location.hash.slice(11)); } catch {}
+  if(workspace?.projectAliases?.[id]){id=workspace.projectAliases[id];history.replaceState(null,'','#/projects/'+id);}
   store=location.hash==='#/library'?workspace?.library:workspace?.projects.find(p=>p.id===id)||null;
   wipData=null;wipHistoryData=null;wipDraft=null;wipFile=null;staffingData=[];productionStaffingData=[];selectedWipSnapshotId='';wipPartMappings={};wipStepMappings={};
   selectedId=null; selectedWorkstream=''; activeTab=store&&store.id!=='library'?'Entry':'Overview'; stakeholderView='People & roles'; productionMode='Process map';productionPartIds=[];productionPartsCustomized=false;productionSelections={};$('#productionLine').value='';$('#productionLine').dataset.previous='';apqpView='Phase dashboard'; openStakeholderGroups.clear(); stakeholderGroupsInitialized=false; resetFilters(); invalidatePreview();
@@ -183,70 +313,103 @@ function route() {
   document.querySelectorAll('[data-production-layer]').forEach(input=>input.checked=input.dataset.productionLayer!=='parts');$('#productionSubprocesses').checked=true;
   $('#stakeholderArea').value='';$('#stakeholderDepartment').value='';$('#stakeholderGrouping').value='department';
   if(store?.id==='library'){$('#perspective').value='all';types=new Set(allTypes);renderTypeFilters();}
+  if(basicAccess){activeTab='Overview';selectedWorkstream='production';}
   restoreViewSettings();
   $('#csvText').value=''; $('#csvResult').innerHTML=''; $('#csvFile').value='';csvChoices={};
   ingestionDraft=null;ingestionSource=null;ingestionJobId=null;ingestionSelection=null;ingestionConfirm=false;$('#aiSourceText').value='';$('#aiSourceFile').value='';renderIngestionReview();
   $('#inspector').hidden=true; document.querySelectorAll('dialog[open]').forEach(d=>d.close());
+  sampleRiskMode='risks';
   render();
-  if(store&&store.id!=='library'){loadWip(selectedWipSnapshotId);loadStaffing();loadProductionStaffing();}
+  if(store&&store.id!=='library')loadProjectMetrics();
 }
 function options() {
-  return {types:[...types],query:$('#searchInput').value,status:$('#statusFilter').value,
+  return {types:[...types].filter(type=>!['Risk','Issue'].includes(type)),query:$('#searchInput').value,status:$('#statusFilter').value,
     start:$('#dateStart').value,end:$('#dateEnd').value,selectedId,
-    focus:selectedId ? $('#focusMode').value : '',keepPredecessors:$('#keepPredecessors').checked,showSubprocesses:$('#showSubprocesses').checked};
+    focus:selectedId&&!mapSelectedIds.size ? $('#focusMode').value : '',keepPredecessors:$('#keepPredecessors').checked,showSubprocesses:$('#showSubprocesses').checked};
 }
 function render() {
-  $('#storageNote').textContent = window.PUBLIC_READ_ONLY?(window.CLOUD_BACKEND?'Public workspace · read only':'Public cloud snapshot · read only'):window.CLOUD_BACKEND?'Supabase · private workspace':'Local SQLite · this computer';
+  if(basicAccess){activeTab='Overview';selectedWorkstream='production';}
   $('#projectHome').hidden=Boolean(store); $('#projectShell').hidden=!store;
-  $('#projectForm').hidden=!workspace;
+  $('#projectForm').hidden=!workspace||window.PUBLIC_READ_ONLY;
   $('#projectError').textContent=startupError;
   $('#localStartHelp').hidden=!startupError;
-  $('#projectList').innerHTML=(workspace?.projects||[]).map(p=>'<article class="project-card"><a href="#/projects/'+encodeURIComponent(p.id)+'">'+h(p.name)+'</a><span>'+h(p.status)+' · '+p.entities.length+' objects</span></article>').join('');
-  $('#exportButton').disabled=!workspace;
-  if(!store) return;
+  const projectFilter=$('#projectTypeFilter').value,listed=(workspace?.projects||[]).filter(p=>!workspace.projectAliases?.[p.id]);
+  $('#projectList').innerHTML=window.ProjectTypes.TYPES.filter(t=>!projectFilter||projectFilter===t.id).map(t=>{const group=listed.filter(p=>window.ProjectTypes.kind(p)===t.id);return group.length?'<section class="project-type-group"><h2>'+h(t.label)+' <small>'+group.length+'</small></h2><div class="project-type-cards">'+group.map(p=>'<article class="project-card"><a href="#/projects/'+encodeURIComponent(p.id)+'">'+h(p.name)+'</a><span>'+h(p.status)+(p.viewPending?' · 프로젝트 열기':' · '+p.entities.length+' objects')+'</span></article>').join('')+'</div></section>':'';}).join('');
+  $('#editProjectType').hidden=!store||store.id==='library'||window.PUBLIC_READ_ONLY||basicAccess;
+  if(!store){eventHistoryUI.update(null);progressUI.update(null);hourlyUI.update(null);samplePreparationUI.update(null);$('#sampleRiskTabs').hidden=true;$('#samplePreparationPanel').hidden=true;$('#projectFeatures').hidden=true;return;}
+  const selectionContext=[store.id,selectedWorkstream,activeTab,$('#mapProductionLine').value,$('#productionLine').value].join('|');
+  if(selectionContext!==mapSelectionContext){mapSelectedIds.clear();mapSelectionContext=selectionContext;}
+  for(const id of mapSelectedIds)if(!Model.byId(store,id))mapSelectedIds.delete(id);
   const library=store.id==='library',archived=store.status==='archived';
+  $('#entryCopilot').hidden=library;
   const entry=activeTab==='Entry'&&!library,lens=activeTab==='Overview'&&Boolean(selectedWorkstream);
   $('#projectEntry').hidden=!entry;$('#projectMenuButton').hidden=library||entry;
-  $('#tabs').hidden=entry||lens||activeTab==='History';
-  $('#lensHeader').hidden=!lens;$('#viewFilters').hidden=entry||activeTab==='History';
+  const productionScope=selectedWorkstream==='production';
+  $('#tabs').hidden=entry||(lens&&!productionScope)||activeTab==='History';
+  $('#lensHeader').hidden=!selectedWorkstream;$('#viewFilters').hidden=entry||activeTab==='History';
   $('#projectHistory').hidden=activeTab!=='History';
   $('#overview').classList.toggle('lens-only',lens);
-  $('.schedule-panel').hidden=lens||library&&activeTab!=='Timeline';
-  $('.map-panel').hidden=library&&activeTab==='Timeline';
-  $('#overview').classList.toggle('library-single-panel',library);
+  $('.schedule-panel').hidden=activeTab!=='Timeline';
+  $('.map-panel').hidden=activeTab==='Timeline';
+  $('#overview').classList.toggle('library-single-panel',true);
   $('#perspectiveControl').hidden=lens;
   $('#mapPartControl').hidden=true;
-  $('#mapPartMulti').hidden=!lens||selectedWorkstream!=='production';
+  $('#mapPartMulti').hidden=activeTab!=='Overview'||Boolean(selectedWorkstream&&selectedWorkstream!=='production');
+  $('#mapProductionLineControl').hidden=!productionScope;
   $('#mapHighlightControl').hidden=!lens||selectedWorkstream!=='production';
   $('#mapContextControls').hidden=activeTab!=='Overview'||$('#perspective').value!=='process';
   $('#overview .layer-menu').hidden=lens&&selectedWorkstream==='production';
   $('#mapTitle').textContent=lens?Model.WORKSTREAMS.find(item=>item.code===selectedWorkstream)?.label+' process map':'Process map';
-  if(lens){$('#lensTitle').textContent=Model.WORKSTREAMS.find(item=>item.code===selectedWorkstream)?.label||'';$('#lensHeader div > p:last-child').textContent=selectedWorkstream==='production'?'All recorded Part routes. Only arrows confirm sequence; select a Step for people and machines.':'Recorded work and dependencies. Select a node for its people, Parts and other context.';}
+  if(selectedWorkstream){$('#lensTitle').textContent=Model.WORKSTREAMS.find(item=>item.code===selectedWorkstream)?.label||'';$('#lensHeader div > p:last-child').textContent=selectedWorkstream==='production'?'Production scope · Parts, machines, people and related records. Select a process for risks and issues.':'Recorded work and dependencies. Select a node for its people, Parts and other context.';}
   if(entry)renderProjectEntry();
   if(activeTab==='History')renderHistory();
-  $('#projectTitle').textContent=store.name; $('#projectState').textContent=library?'All ontology · shared DB':archived?'Archived · read only':'';
+  $('#projectTitle').textContent=store.name; $('#projectState').textContent=library?'All ontology · shared DB':(window.ProjectTypes.TYPES.find(t=>t.id===window.ProjectTypes.kind(store))?.label||'')+(archived?' · Archived · read only':'');
   $('#addFromLibrary').hidden=library;$('#renameProject').hidden=library;$('#archiveProject').hidden=library;$('#removeFromProject').hidden=library;
+  $('#projectFeatures').hidden=library||basicAccess;$('#projectFeatures').disabled=store.status==='archived';
   $('#scopeLabel').textContent=library?'Global Library · unassigned objects':'Project: '+store.name+' · writes to shared DB';
   $('#archiveProject').textContent=archived?'Restore':'Archive';
-  ['renameProject','addFromLibrary','removeFromProject','recordsAdd','productionConnect','addEntityButton','addRelationButton','editEntity','previewCSV','extractSource'].forEach(id=>$('#'+id).disabled=archived||Boolean(window.PUBLIC_READ_ONLY));
+  ['renameProject','addFromLibrary','removeFromProject','recordsAdd','productionConnect','addEntityButton','addRelationButton','editEntity','previewCSV','extractSource'].forEach(id=>$('#'+id).disabled=archived);
   $('#extractSource').disabled=archived||!aiConfigured;
   $('#externalTransfer').textContent=aiConfigured?'Pressing Extract sends only this source to the configured Gemini API. Your full ontology stays on this computer. Review the draft before any ontology update.':'AI not configured. Set GEMINI_API_KEY on the local server; manual and CSV input remain available.';
   if(archived) invalidatePreview();
-  const visibleTabs=library?['Overview','Timeline',...tabs.filter(tab=>tab!=='Overview')]:tabs;
-  $('#tabs').innerHTML=visibleTabs.map(tab=>'<button data-tab="'+h(tab)+'"'+(activeTab===tab?' aria-current="page"':'')+'>'+h(library&&tab==='Overview'?'Process map':tab)+'</button>').join('');
+  const visibleTabs=productionScope?['Overview','Parts','Risk / Issues','Resources','Stakeholders','Records']:['Overview','Timeline',...tabs.filter(tab=>tab!=='Overview')];
+  if(!library)visibleTabs.push('Copilot');
+  $('#tabs').innerHTML=visibleTabs.map(tab=>'<button data-tab="'+h(tab)+'"'+(activeTab===tab?' aria-current="page"':'')+'>'+h(tab==='Overview'?'Process map':tab)+'</button>').join('');
   $('#overview').hidden=!['Overview','Timeline'].includes(activeTab); $('#inputView').hidden=activeTab!=='Input';
-  $('#recordsView').hidden=['Entry','Overview','Timeline','Input','History'].includes(activeTab);
+  $('#recordsView').hidden=['Entry','Overview','Timeline','Input','History','Copilot'].includes(activeTab);
+  $('#copilotView').hidden=activeTab!=='Copilot';
   $('#productionView').hidden=activeTab!=='Production'||productionMode!=='Process map';
   $('#wipView').hidden=activeTab!=='Production'||productionMode!=='WIP snapshots';
   $('#productionStaffingView').hidden=activeTab!=='Production'||productionMode!=='WIP snapshots';
   $('#productionLogsView').hidden=activeTab!=='Production'||productionMode!=='Process logs';
   const opt=options(), invalid=opt.start && opt.end && opt.start>opt.end;
   $('#filterError').textContent=invalid?'From must be on or before Through. Fix the range to see results.':'';
-  if(activeTab==='Overview') { renderMap(invalid); if(!lens&&!library)renderSchedule(invalid); }
+  if(activeTab==='Overview') renderMap(invalid);
   else if(activeTab==='Timeline')renderSchedule(invalid);
+  else if(activeTab==='Copilot')renderCopilot();
   else if(!['Entry','Input','History'].includes(activeTab)) renderRecords(invalid);
   if(!$('#inspector').hidden) renderInspector();
+  decorateMapSelection();
+  eventHistoryUI.update(!basicAccess&&!progressUI.active&&!hourlyUI.active&&['Overview','Production'].includes(activeTab)?{workspace,store,kind:activeTab==='Production'?'production':'overview',viewKey:activeTab==='Production'?'production':selectedWorkstream?'lens-'+selectedWorkstream:'overview',selection:mapSelectedIds,workstream:selectedWorkstream,groups:historyGroups,lineId:selectedWorkstream==='production'?store.entities.find(e=>e.type==='Resource'&&e.resourceKind==='line'&&e.name===$('#mapProductionLine').value)?.id||'':''}:null);
+  const progressKind=activeTab==='Production'&&productionMode==='Process map'?'production':activeTab==='Overview'&&selectedWorkstream==='production'?'overview':'';
+  const features=workspace.viewSettings?.[store.id]?.features||window.HourlyProduction.defaults(store);
+  progressUI.update(progressKind&&store.id!=='library'&&(basicAccess||features.wip)?{workspace,store,basic:basicAccess,kind:progressKind,partIds:progressKind==='production'?productionPartIds:mapPartIds,zoom:progressKind==='production'?productionZoom:zoom,restore:s=>{if(progressKind==='production'){productionPartIds=[...s.ids];productionZoom=s.zoom;}else{mapPartIds=[...s.ids];zoom=s.zoom;}}}:null);
+  hourlyUI.update(!basicAccess&&features.hourly&&progressKind?{workspace,store,kind:progressKind,select:id=>{mapSelectedIds.clear();mapSelectedIds.add(id);decorateMapSelection();}}:null);
+  document.querySelectorAll('.production-mode-toolbar').forEach(bar=>bar.hidden=true);
+  if(progressKind&&(progressUI.ctx||hourlyUI.ctx)){
+    const stage=$('#'+(progressKind==='production'?'productionMapStage':'mapStage')),container=stage.closest('.event-history-layout')||stage;
+    let bar=container.parentElement.querySelector('.production-mode-toolbar');
+    if(!bar){bar=document.createElement('nav');bar.className='production-mode-toolbar';bar.setAttribute('aria-label','Production data views');}
+    container.before(bar);bar.hidden=false;
+    if(progressUI.ctx){bar.append(progressUI.toggleButton);progressUI.view.bar.hidden=!progressUI.active;}
+    if(hourlyUI.ctx){bar.append(hourlyUI.toggleButton);hourlyUI.bar.hidden=!hourlyUI.active;}
+  }
   renderSavedChange();
+  mapAssistantUI.update();
+  const sampleRisk=activeTab==='Risk / Issues'&&window.SamplePreparation.isSample(store)&&!basicAccess,showPreparation=sampleRisk&&sampleRiskMode==='preparation';
+  $('#sampleRiskTabs').hidden=!sampleRisk;$('#samplePreparationPanel').hidden=!showPreparation;$('#recordsTable').hidden=showPreparation;
+  $('#sampleRiskTabs').querySelectorAll('[data-sample-risk]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.sampleRisk===sampleRiskMode)));
+  samplePreparationUI.update(showPreparation?{workspace,store,container:$('#samplePreparationPanel'),readOnly:window.PUBLIC_READ_ONLY||basicAccess}:null);
 }
 function renderProjectEntry() {
   const workstreams=store.workstreams||{};
@@ -255,7 +418,7 @@ function renderProjectEntry() {
     const count=Object.values(workstreams).filter(codes=>codes.includes(item.code)).length;
     return '<button class="workstream-choice" data-workstream="'+item.code+'"><span class="workstream-code">'+h(item.code)+'</span><strong>'+h(item.label)+'</strong><span>'+h(descriptions[item.code])+'</span><small>'+count+' assigned object'+(count===1?'':'s')+' <span aria-hidden="true">→</span></small></button>';
   }).join('');
-  const unassigned=store.entities.filter(entity=>!['Person','Organization'].includes(entity.type)&&!(workstreams[entity.id]||[]).length);
+  const unassigned=store.entities.filter(entity=>entity.status!=='archived'&&!['Person','Organization'].includes(entity.type)&&!(workstreams[entity.id]||[]).length);
   $('#unassignedCount').textContent='Unassigned objects · '+unassigned.length;
   $('#unassignedItems').innerHTML=unassigned.slice(0,100).map(entity=>'<button data-select="'+h(entity.id)+'">'+h(entity.type+' · '+entity.name)+'</button>').join('')+(unassigned.length>100?'<p>Showing first 100. Find the rest in Objects.</p>':'')||'<p>Every object is classified.</p>';
 }
@@ -296,7 +459,8 @@ function renderTypeFilters() {
   $('#typeFilters').innerHTML=allTypes.map(type=>'<label class="check"><input type="checkbox" data-type="'+h(type)+'"'+(types.has(type)?' checked':'')+'>'+h(type)+'</label>').join('');
 }
 function renderMapPartOptions() {
-  const parts=store.entities.filter(e=>['Part','Part Revision'].includes(e.type)&&(selectedWorkstream!=='production'||Model.isProductPart(e))).sort(partFamilyOrder);
+  const line=selectedWorkstream==='production'?$('#mapProductionLine').value:'';
+  const parts=store.entities.filter(e=>Model.isProductPart(e)&&(!line||e.productionFamily===line)).sort(partFamilyOrder);
   if(!mapPartsCustomized)mapPartIds=parts.map(part=>part.id);
   const ids=new Set(parts.map(part=>part.id));mapPartIds=mapPartIds.filter(id=>ids.has(id));
   if(!mapPartIds.includes(mapPartId))mapPartId=mapPartIds[0]||'';
@@ -325,9 +489,9 @@ function renderProductionPartOptions() {
 const partFamily=part=>part.productionFamily?.trim()||'Unclassified';
 const partFamilyOrder=(a,b)=>partFamily(a).localeCompare(partFamily(b))||(a.productFamily||'').localeCompare(b.productFamily||'')||a.name.localeCompare(b.name);
 function partChoiceRows(parts,term,selected,prefix){
-  let last='';return parts.filter(part=>!term||part.name.toLowerCase().includes(term)||partFamily(part).toLowerCase().includes(term)||(part.productFamily||'').toLowerCase().includes(term)).map(part=>{
+  let last='';return parts.filter(part=>!term||part.name.toLowerCase().includes(term)||partFamily(part).toLowerCase().includes(term)||(part.productFamily||'').toLowerCase().includes(term)||(part.modelCode||'').toLowerCase().includes(term)).map(part=>{
     const family=partFamily(part)+(part.productFamily?' / '+part.productFamily:''),heading=family===last?'':'<strong class="part-family-heading">'+h(family)+'</strong>';last=family;
-    return heading+'<div class="map-part-choice"><label class="check"><input type="checkbox" data-'+prefix+'-part-choice="'+h(part.id)+'"'+(selected.includes(part.id)?' checked':'')+'>'+h(part.name)+'</label><button type="button" data-'+prefix+'-only="'+h(part.id)+'">Only</button></div>';
+    return heading+'<div class="map-part-choice"><label class="check"><input type="checkbox" data-'+prefix+'-part-choice="'+h(part.id)+'"'+(selected.includes(part.id)?' checked':'')+'>'+h(part.name+(part.modelCode?' · '+part.modelCode:''))+'</label><button type="button" data-'+prefix+'-only="'+h(part.id)+'">Only</button></div>';
   }).join('')||'<p class="muted">No matching Parts.</p>';
 }
 function durationLabel(seconds) {
@@ -357,8 +521,27 @@ function networkMetric(node,mode,highlightPartId='') {
   const row=direct||(machines.length===1?productionStaffingData.find(item=>item.targetId===machines[0]):null);
   return {text:(row?row.count:'—')+' workers',title:row?'Direct '+row.basis+' at '+row.capturedAt+' · '+(direct?'Step':'one linked machine')+' · shift '+(row.shift||'not recorded'):'No direct Step observation'+(machines.length===1?' or linked-machine observation':'')};
 }
+function mapGroupFrames(layout) {
+  return (layout.frames||[]).map(f=>'<g class="universal-group" transform="translate('+f.x+' '+f.y+')"><rect class="universal-group-boundary" width="'+f.width+'" height="'+f.height+'" rx="16"></rect>'+(f.collapsed?'':f.static?'<text x="20" y="32">'+h(f.kind+' · '+f.name)+'</text>':'<g data-group-toggle="'+h(f.id)+'" tabindex="0" role="button" aria-expanded="true" aria-label="Collapse '+h(f.name)+'"><rect class="universal-group-heading" x="8" y="8" width="'+(f.width-16)+'" height="36" rx="8"></rect><text x="20" y="32">'+h(f.kind+' · '+f.name)+' −</text></g>')+'</g>').join('');
+}
+function mapGroupSettings(network,whole=false) {
+  const saved=workspace.viewSettings?.[store.id]?.universalGroups;
+  if(saved)return saved.collapsed||[];
+  const groups=MapGroups.universalGraph({entities:network.nodes.map(n=>n.entity),relations:network.edges},[],store).groups;
+  return [...groups.values()].filter(g=>g.kind==='Team'||whole&&g.kind==='Part family').map(g=>g.id);
+}
+function presentNetwork(kind,network,layout,partOnly=false,whole=false) {
+  const production=kind==='production',options={showMachines:$(production?'#productionSeeMachines':'#mapSeeMachines').checked,showComponents:$(production?'#productionSeeComponents':'#mapSeeComponents').checked,collapsed:mapGroupSettings(network,whole)};
+  if(partOnly){const row=MapGroups.partRows(store,network,options);network=row.network;layout=row.layout;historyGroups=Object.fromEntries([...row.groups].map(([id,g])=>[id,[...new Set(g.members.map(n=>n.entity.id))]]));}
+  const quality=QualityMap.augment(store,network,layout,qualityExpanded,{showPeople:$(production?'#productionSeeStakeholders':'#mapSeeStakeholders').checked});
+  if(partOnly)return quality;
+  const grouped=MapGroups.networkGroups(store,quality.network,{...options,layout:quality.layout});
+  historyGroups=Object.fromEntries([...grouped.groups].map(([id,g])=>[id,[...new Set(g.members.map(n=>n.entity.id))]]));
+  return grouped;
+}
 function drawNetworkCanvas(kind,projection,layout) {
   const production=kind==='production',edgeLayer=$(production?'#productionEdges':'#edgeLayer'),nodeLayer=$(production?'#productionNodes':'#nodeLayer');
+  const progress=progressUI.enabled(kind,store)||hourlyUI.enabled(kind,store);
   if(production)$('#productionLaneLabels').innerHTML='';
   const mode=$(production?'#productionNumbers':'#showNumbers').value,highlight=production?productionHighlightPartId:selectedWorkstream==='production'?mapHighlightPartId:'';
   const stage=$(production?'#productionMapStage':'#mapStage');
@@ -378,37 +561,41 @@ function drawNetworkCanvas(kind,projection,layout) {
     const sy=y+24,ey=position.y+30;
     const path='M '+sx+' '+(incoming?sy:ey)+' C '+((sx+ex)/2)+' '+(incoming?sy:ey)+', '+((sx+ex)/2)+' '+(incoming?ey:sy)+', '+ex+' '+(incoming?ey:sy);
     const muted=!Flow.belongsToPart(item,highlight);
-    return '<g class="production-context-link '+(item.kind==='machine'?'machine-link ':'material-link ')+(muted?'route-muted':'')+'"><title>'+h(item.relation.type+' · '+item.entity.name)+'</title><path d="'+path+'" marker-end="url(#'+(production?'productionArrow':'arrow')+')"></path></g>';
+    return '<g data-from="'+h(item.stepId)+'" data-to="'+h(item.entity.id)+'" class="production-context-link '+(item.kind==='machine'?'machine-link ':'material-link ')+(muted?'route-muted':'')+'"><title>'+h(item.relation.type+' · '+item.entity.name)+'</title><path d="'+path+'" marker-end="url(#'+(production?'productionArrow':'arrow')+')"></path></g>';
   }).join('');
   edgeLayer.innerHTML=projection.edges.map(edge=>{
     const from=layout.positions[edge.from],to=layout.positions[edge.to];if(!from||!to)return '';
-    const sx=from.x+97,sy=from.y+60,ex=to.x+97,ey=to.y-3;
-    const path=ey>sy?'M '+sx+' '+sy+' C '+sx+' '+((sy+ey)/2)+', '+ex+' '+((sy+ey)/2)+', '+ex+' '+ey:'M '+sx+' '+sy+' C '+(sx+105)+' '+(sy+26)+', '+(ex+105)+' '+(ey-26)+', '+ex+' '+ey;
-    const failure=edge.type==='on_failure',rework=edge.type==='rework_of',context=edge.type==='subprocess';
+    const horizontal=progress||layout.horizontal&&Math.abs(from.y-to.y)<1;
+    const sx=from.x+(horizontal?194:97),sy=from.y+(progress?50:horizontal?30:60),ex=to.x+(horizontal?-3:97),ey=to.y+(progress?50:horizontal?30:-3);
+    const path=horizontal?'M '+sx+' '+sy+' C '+((sx+ex)/2)+' '+sy+', '+((sx+ex)/2)+' '+ey+', '+ex+' '+ey:ey>sy?'M '+sx+' '+sy+' C '+sx+' '+((sy+ey)/2)+', '+ex+' '+((sy+ey)/2)+', '+ex+' '+ey:'M '+sx+' '+sy+' C '+(sx+105)+' '+(sy+26)+', '+(ex+105)+' '+(ey-26)+', '+ex+' '+ey;
+    const failure=edge.type==='on_failure',rework=edge.type==='rework_of',context=edge.qualityEdge||['supports_line','operated_in','subprocess','member_of','reports_via','escalates_to','reports_to','manages','works_on','assigned'].includes(edge.type);
     const muted=!Flow.belongsToPart(edge,highlight)||related&&!related.has(edge.from)&&!related.has(edge.to);
     const arrow=production?failure?'productionFailureArrow':rework?'productionReturnArrow':'productionArrow':'arrow';
     const width=Math.min(4,1.7+(edge.partIds?.length||0)*.35);
-    const disposition=Model.byId(store,edge.to)?.productionStage==='Scrap'?'Not fixed · Scrap':rework?'Fixed · retest':'';
-    return '<g class="'+(muted?'route-muted':'')+'"><title>'+h(edge.type+(edge.evidence?' · '+edge.evidence:'')+(edge.partIds?.length?' · '+edge.partIds.length+' selected Parts':''))+'</title><path class="edge flow-edge '+(failure?'failure-edge':rework?'return-edge':context?'context-edge':'normal-edge')+'" style="--flow-width:'+width+'" d="'+path+'" marker-end="url(#'+arrow+')"></path>'+(disposition?'<text class="edge-label" x="'+((sx+ex)/2)+'" y="'+((sy+ey)/2-8)+'" text-anchor="middle">'+h(disposition)+'</text>':'')+'</g>';
+    const originReturn=Model.byId(store,edge.to)?.parentWorkId&&edge.to.startsWith('smt-origin-')&&failure;
+    const disposition=Model.byId(store,edge.to)?.productionStage==='Scrap'?'Not fixed · Scrap':originReturn?'Confirmed SMT origin only':rework?(edge.from.startsWith('smt-origin-')?'Accepted · original step':'Fixed · retest'):'';
+    return '<g data-from="'+h(projection.nodes.find(n=>n.id===edge.from)?.entity.id||edge.from)+'" data-to="'+h(projection.nodes.find(n=>n.id===edge.to)?.entity.id||edge.to)+'" class="'+(muted?'route-muted':'')+(edge.qualityEdge?' quality-link':'')+(['operated_in','supports_line'].includes(edge.type)?' contact-link':'')+'"><title>'+h(edge.type+(edge.evidence?' · '+edge.evidence:'')+(edge.partIds?.length?' · '+edge.partIds.length+' selected Parts':''))+'</title><path class="edge flow-edge '+(failure?'failure-edge':rework?'return-edge':context?'context-edge':'normal-edge')+'" style="--flow-width:'+width+'" d="'+path+'" marker-end="url(#'+arrow+')"></path>'+(disposition?'<text class="edge-label" x="'+((sx+ex)/2)+'" y="'+((sy+ey)/2-8)+'" text-anchor="middle">'+h(disposition)+'</text>':'')+'</g>';
   }).join('')+satelliteEdges;
-  nodeLayer.innerHTML=projection.nodes.map(node=>{
+  nodeLayer.innerHTML=mapGroupFrames(layout)+projection.nodes.map(node=>{
     const entity=node.entity,pos=layout.positions[node.id];if(!pos)return '';
+    if(node.groupId)return '<g class="node flow-node collapsed-map-group" data-group-toggle="'+h(node.groupId)+'" tabindex="0" role="button" aria-expanded="false" aria-label="Expand '+h(entity.name)+'" transform="translate('+pos.x+' '+pos.y+')"><rect class="flow-card" width="194" height="60" rx="18"></rect><text class="node-name" x="14" y="27">'+h(short(entity.name,24))+' +</text><text class="flow-machine" x="14" y="47">'+node.groupCount+' objects · 펼치기</text></g>';
     const resources=store.relations.filter(r=>r.type==='requires'&&r.from===entity.id).map(r=>Model.byId(store,r.to)).filter(item=>item?.type==='Resource');
     const machineMode=resources.length===1?resources[0].machineMode:'';
     const machineName=resources[0]?.name||'';
     const machinePrefix=/^(shared|common|pool|dedicated|specific)\b/i.test(machineName)?'':machineMode==='shared_pool'?'Shared · ':machineMode==='specific_asset'?'Dedicated · ':'';
     const machine=resources.length===1?machinePrefix+machineName:resources.length>1?resources.length+' linked resources':'';
-    const metric=networkMetric(node,mode,highlight);
+    const metric=entity.type==='Production Step'?networkMetric(node,mode,highlight):null;
     const failure=['exception','rework'].includes(entity.branchKind),sub=Flow.isSubprocess(entity);
-    const muted=!Flow.belongsToPart(node,highlight)||related&&!related.has(entity.id)||matches&&!matches.has(entity.id);
-    const parts=(node.partIds||[]).map(id=>Model.byId(store,id)?.name||id);
+    const muted=!progress&&(!Flow.belongsToPart(node,highlight)||related&&!related.has(entity.id)||matches&&!matches.has(entity.id));
+    const parts=(node.partIds||[]).map(id=>{const p=Model.byId(hourlyUI.enabled(kind,store)&&hourlyUI.previewProject?hourlyUI.previewProject:store,id);return (p?.name||id)+(progress&&p?.modelCode?' · '+p.modelCode:'');});
     const full=[entity.name,resources.map(item=>item.name+(item.machineMode==='shared_pool'?' · common':item.machineMode==='specific_asset'?' · dedicated':'')).join(', '),parts.length?'Parts: '+parts.join(', '):'',metric?.text,metric?.title,node.unconfirmed?'Order not recorded':''].filter(Boolean).join(' · ');
-    const stage=contextMode&&entity.type==='Production Step'?(entity.productionStage||entity.name.split('·').at(-1).trim()):entity.name;
-    const secondary=contextMode&&entity.type==='Production Step'?(failure?'Shared · problem path':parts.length===1?short(parts[0].replace(' (route label)',''),25):parts.length>1?parts.length+' shared Part routes':node.unconfirmed?'Order unconfirmed':'No linked Part'):machine||entity.type;
-    return '<g class="node flow-node '+(sub?'subprocess ':'')+(failure?'failure-step ':'')+(node.unconfirmed?'unplaced-step ':'')+(muted?'route-muted ':'')+(selectedId===entity.id?'selected':'')+'" data-select="'+h(entity.id)+'" data-route-parts="'+h((node.partIds||[]).join(','))+'" tabindex="0" role="button" aria-pressed="'+(selectedId===entity.id)+'" aria-label="'+h(full)+'" style="--node-color:'+(Model.COLORS[entity.type]||'#138bbb')+'" transform="translate('+pos.x+' '+pos.y+')"><title>'+h(full)+'</title><rect class="flow-card" width="194" height="60" rx="18"></rect><polygon class="activity-mark" points="14,22 23,17 32,22 32,32 23,37 14,32"></polygon><text class="node-name" x="41" y="27">'+h(short(stage,21))+'</text><text class="flow-machine '+(machineMode==='shared_pool'?'shared':machineMode==='specific_asset'?'specific':'')+'" x="41" y="47">'+h(short(secondary,25))+'</text>'+(metric?'<rect class="metric-badge" x="105" y="-23" width="94" height="22" rx="11"></rect><text class="metric-text" x="152" y="-8" text-anchor="middle">'+h(metric.text)+'</text>':'')+'</g>';
+    const stage=node.qualityLabel||(contextMode&&entity.type==='Production Step'?(entity.displayProcessName||entity.productionStage||entity.name.split('·').at(-1).trim()):entity.name);
+    const secondary=node.qualitySubtitle||(entity.type==='Person'?short((entity.title||'Person')+' · '+(entity.shift||'Line level'),31):entity.resourceKind==='line'?short(entity.capacityNote||'Production line',31):contextMode&&entity.type==='Production Step'?(failure?'Shared · problem path':parts.length===1?short(parts[0].replace(' (route label)',''),25):parts.length>1?parts.length+' shared Part routes':node.unconfirmed?'Order unconfirmed':'No linked Part'):machine||entity.type);
+    const qualityAttrs=node.qualityToggle?' data-quality-toggle="'+h(node.qualityToggle)+'" aria-expanded="'+node.qualityExpanded+'"':'';
+    return '<g class="node flow-node '+(node.qualityViewKind?'quality-chip quality-'+h(node.qualityViewKind)+' '+(entity.qualityColor?'quality-color-'+h(entity.qualityColor)+' ':''):'')+(progress?'progress-chip ':'')+(sub?'subprocess ':'')+(failure?'failure-step ':'')+(node.unconfirmed?'unplaced-step ':'')+(muted?'route-muted ':'')+(selectedId===entity.id?'selected':'')+'" data-select="'+h(entity.id)+'" data-route-parts="'+h((node.partIds||[]).join(','))+'"'+qualityAttrs+' tabindex="0" role="button" aria-pressed="'+(selectedId===entity.id)+'" aria-label="'+h(node.qualityViewKind?[stage,secondary,entity.context].filter(Boolean).join(' · '):full)+'" style="--node-color:'+(Model.COLORS[entity.type]||'#138bbb')+'" transform="translate('+pos.x+' '+pos.y+')"><title>'+h(node.qualityViewKind?[stage,secondary,entity.context].filter(Boolean).join(' · '):full)+'</title><rect class="flow-card" width="194" height="'+(progress?108:60)+'" rx="18"></rect><polygon class="activity-mark" points="14,22 23,17 32,22 32,32 23,37 14,32"></polygon><text class="node-name" x="41" y="27">'+h(short(stage,21))+'</text><text class="flow-machine '+(machineMode==='shared_pool'?'shared':machineMode==='specific_asset'?'specific':'')+'" x="41" y="47">'+h(short(secondary,25))+'</text>'+(metric&&!progress?'<rect class="metric-badge" x="105" y="-23" width="94" height="22" rx="11"></rect><text class="metric-text" x="152" y="-8" text-anchor="middle">'+h(metric.text)+'</text>':'')+'</g>';
   }).join('')+satellites.map(item=>{
     const entity=item.entity,relation=item.relation,material=item.kind==='part',qty=relation.quantity?' ×'+relation.quantity:'',mode=entity.machineMode==='shared_pool'?'Shared pool':entity.machineMode==='specific_asset'?'Specific asset':'Machine family · use unconfirmed';
-    const label=material?short(entity.name,23):short(entity.machineFamily||entity.name,23);
+    const label=material?short(entity.name,23):short(entity.tier?.split('/').at(-1).trim()||entity.machineFamily||entity.name,23);
     const itemKind=Model.isComponentPart(entity)?'C':'P';
     const sublabel=material?(itemKind==='C'?'Component (C)':'Product (P)')+qty:mode;
     const full=[entity.name,relation.type,relation.quantity?'quantity '+relation.quantity+' '+(relation.unit||'pieces'):'quantity unconfirmed',relation.basis,relation.reviewState,relation.evidence].filter(Boolean).join(' · ');
@@ -432,16 +619,20 @@ function summaryLayout(entities) {
   return {positions,width:columns*256+32,height:Math.max(320,Math.ceil(entities.length/columns)*132+72)};
 }
 function renderMap(invalid) {
+  historyGroups={};
   renderMapPartOptions();
   const opt=options(),whole=!opt.focus;
-  if(!invalid&&store.id!=='library'&&selectedWorkstream==='production'){
+  if((!invalid||progressUI.enabled('overview',store))&&(store.id!=='library'&&selectedWorkstream==='production'||!selectedWorkstream&&mapPartsCustomized)){
     $('#fitMap').textContent='Fit';$('#mapStage').classList.add('network-map');
     $('.map-footer span').innerHTML='Arrows: recorded order · red dashed: problem path<br>Counts: latest saved WIP or direct worker observation · click a Step for source';
-    const projection=Flow.productionNetwork(store,{partIds:mapPartIds,start:opt.start,end:opt.end});
-    graphSize=Flow.productionContextLayout(store,projection,{showMachines:$('#mapSeeMachines').checked,showComponents:$('#mapSeeComponents').checked});applyZoom();
-    drawNetworkCanvas('overview',projection,graphSize);
-    $('#mapCount').textContent=projection.parts.length+' Parts · '+projection.nodes.length+' distinct steps · '+projection.unlinked.length+' unlinked';
-    $('#emptyState').hidden=projection.nodes.length>0;
+    const projection=progressUI.filter('overview',store,Flow.productionNetwork(store,{showStakeholders:hourlyUI.enabled('overview',store)||$('#mapSeeStakeholders').checked,showLineReferences:!mapPartsCustomized,line:hourlyUI.enabled('overview',store)&&store.name==='SMT'?'SMT':selectedWorkstream==='production'?$('#mapProductionLine').value:'',partIds:mapPartIds,start:progressUI.enabled('overview',store)?'':opt.start,end:progressUI.enabled('overview',store)?'':opt.end}));
+    let shown=hourlyUI.graph('overview',store,projection);
+    graphSize=hourlyUI.layout('overview',store,shown,progressUI.layout('overview',store,shown,Flow.productionContextLayout(store,shown,{showMachines:!progressUI.enabled('overview',store)&&$('#mapSeeMachines').checked,showComponents:!progressUI.enabled('overview',store)&&$('#mapSeeComponents').checked})));applyZoom();
+    if(!progressUI.enabled('overview',store)&&!hourlyUI.enabled('overview',store)){const view=presentNetwork('overview',shown,graphSize,mapPartsCustomized);shown=view.network;graphSize=view.layout;applyZoom();}
+    drawNetworkCanvas('overview',shown,graphSize);
+    $('#mapCount').textContent=projection.parts.length+' Parts · '+projection.nodes.filter(n=>n.entity.type==='Production Step').length+' steps · '+projection.nodes.filter(n=>n.entity.type!=='Production Step').length+' related objects · '+projection.unlinked.length+' unlinked';
+    $('#emptyState').hidden=shown.nodes.length>0;
+    $('#emptyState').querySelector('strong').textContent='No process recorded for '+($('#mapProductionLine').value||'selected Parts');
     return;
   }
   if(!invalid&&store.id!=='library'&&$('#perspective').value==='process'&&(!selectedWorkstream||selectedWorkstream!=='production')){
@@ -450,16 +641,25 @@ function renderMap(invalid) {
     const all=Flow.workstreamLanes(store,{...opt,query:'',focus:'',selectedId:null});
     let projection=all;
     if(selectedWorkstream){
-      const primary=all.lanes.find(lane=>lane.code===selectedWorkstream)||{code:selectedWorkstream,label:selectedWorkstream,items:[]};
+      const primary={code:selectedWorkstream,label:Model.WORKSTREAMS.find(s=>s.code===selectedWorkstream)?.label||selectedWorkstream,items:all.entities.filter(e=>(store.workstreams[e.id]||[]).includes(selectedWorkstream)).map(entity=>({id:entity.id,entity,secondary:[]}))};
       const own=new Set(primary.items.map(item=>item.id));
       const near=new Set(all.edges.flatMap(edge=>own.has(edge.from)?[edge.to]:own.has(edge.to)?[edge.from]:[]).filter(id=>!own.has(id)));
       const related=all.entities.filter(entity=>near.has(entity.id)).map(entity=>({id:entity.id,entity,secondary:[]}));
       projection={...all,lanes:[primary,...(related.length?[{code:'related',label:'Linked from other streams',items:related}]:[])],edges:all.edges.filter(edge=>(own.has(edge.from)||near.has(edge.from))&&(own.has(edge.to)||near.has(edge.to)))};
     }
     const nodes=projection.lanes.flatMap(lane=>lane.items.map(item=>({id:item.id,entity:item.entity,partIds:[]})));
-    const network={nodes:[...new Map(nodes.map(node=>[node.id,node])).values()],edges:projection.edges,parts:store.entities.filter(Model.isProductPart)};
+    let network={nodes:[...new Map(nodes.map(node=>[node.id,node])).values()],edges:projection.edges,parts:store.entities.filter(Model.isProductPart)};
+    if(!selectedWorkstream){
+      const graph=Flow.projectGraph(store,opt),present=new Set(network.nodes.map(n=>n.id));
+      const machines=new Set(graph.relations.filter(r=>r.type==='requires'&&present.has(r.from)&&['machine','test_equipment'].includes(Model.byId(store,r.to)?.resourceKind)).map(r=>r.to));
+      for(const entity of graph.entities)if(!present.has(entity.id)&&!entity.qualityKind&&!entity.productionEventKind&&['Part','Part Revision','Resource','Person','Organization'].includes(entity.type)&&(!['Person','Organization'].includes(entity.type)||$('#mapSeeStakeholders').checked)&&!machines.has(entity.id))network.nodes.push({id:entity.id,entity,partIds:[]});
+      const visible=new Set(network.nodes.map(n=>n.id)),edgeIds=new Set(network.edges.map(e=>e.id));
+      for(const edge of graph.relations)if(visible.has(edge.from)&&visible.has(edge.to)&&!edgeIds.has(edge.id))network.edges.push({...edge,partIds:[]});
+    }
     for(const node of network.nodes)node.partIds=store.relations.filter(relation=>relation.from===node.id&&relation.type==='applies_to'&&Model.isProductPart(Model.byId(store,relation.to))).map(relation=>relation.to);
     graphSize=Flow.productionContextLayout(store,network,{showMachines:$('#mapSeeMachines').checked,showComponents:$('#mapSeeComponents').checked});applyZoom();
+    if(!selectedWorkstream){const view=presentNetwork('overview',network,graphSize,false,true);network=view.network;graphSize=view.layout;applyZoom();}
+    else if(selectedWorkstream==='quality'){const quality=QualityMap.augment(store,network,graphSize,qualityExpanded,{showPeople:$('#mapSeeStakeholders').checked});network=quality.network;graphSize=quality.layout;applyZoom();}
     drawNetworkCanvas('overview',network,graphSize);
     $('#mapCount').textContent=network.nodes.length+' process records · '+network.edges.length+' recorded links';
     $('#emptyState').hidden=network.nodes.length>0;
@@ -468,8 +668,13 @@ function renderMap(invalid) {
   $('#mapStage').classList.remove('network-map');$('#fitMap').textContent='Fit';
   $('.map-footer span').innerHTML='Solid: recorded dependency · dashed: context / branch<br>Select an object to inspect its typed relationships.';
   let graph=invalid?{entities:[],relations:[],context:new Set(),boundary:new Set()}:selectedWorkstream==='production'&&mapPartId?Flow.partFocusedGraph(store,mapPartId,opt):selectedWorkstream==='production'&&whole?Flow.partSummary(store,opt):!selectedWorkstream&&$('#perspective').value==='process'&&whole?Flow.workstreamSummary(store,opt):selectedWorkstream?Flow.workstreamGraph(store,selectedWorkstream,opt):Flow.projectGraph(store,opt);
+  if(store.id==='library'&&!invalid){
+    const settings=workspace.viewSettings?.library?.universalGroups||{};
+    graph=MapGroups.universalGraph(Flow.projectGraph(store,opt),settings.collapsed||[],store);
+  }
   if(graph.summary&&!graph.matched)graph={...graph,entities:[],relations:[]};
-  const layout=graph.summary?summaryLayout(graph.entities):selectedWorkstream==='production'&&mapPartId?Flow.productionLayout(graph,{compact:true}):Flow.layout(graph.entities,graph.relations), pos=layout.positions;
+  historyGroups=graph.groups?Object.fromEntries([...graph.groups].map(([id,g])=>[id,g.members.map(e=>e.id)])):{};
+  const layout=graph.groups&&store.id==='library'?MapGroups.universalLayout(graph,Flow.layout):graph.summary?summaryLayout(graph.entities):selectedWorkstream==='production'&&mapPartId?Flow.productionLayout(graph,{compact:true}):Flow.layout(graph.entities,graph.relations), pos=layout.positions;
   graphSize=layout; applyZoom();
   const related=!graph.summary&&selectedId ? ($('#focusMode').value==='downstream'?Flow.downstream(store,selectedId):Flow.neighborhood(store,selectedId)):null;
   const total=selectedWorkstream?Object.values(store.workstreams||{}).filter(codes=>codes.includes(selectedWorkstream)).length:store.entities.length;
@@ -484,11 +689,12 @@ function renderMap(invalid) {
     const path=same?'M '+(a.x+220)+' '+(a.y+46)+' C '+(a.x+248)+' '+(a.y+10)+', '+(b.x-24)+' '+(b.y+10)+', '+b.x+' '+(b.y+46)
       :'M '+startX+' '+startY+' C '+startX+' '+((startY+endY)/2)+', '+endX+' '+((startY+endY)/2)+', '+endX+' '+endY;
     const highlight=selectedId && (r.from===selectedId||r.to===selectedId);
-    const sub=!graph.summary&&(Flow.isSubprocess(Model.byId(store,r.from))||Flow.isSubprocess(Model.byId(store,r.to)));
-    return '<g class="'+(sub&&!highlight?'sub-edge ':related&&!highlight?'dimmed':'')+'"><path class="edge '+(r.type==='precedes'?'':'context-edge ')+(highlight?'highlighted':'')+'" d="'+path+'"></path><text class="edge-label" x="'+((a.x+b.x+220)/2)+'" y="'+(same?a.y+32:(startY+endY)/2-5)+'" text-anchor="middle">'+h(r.type)+'</text></g>';
+    const sub=!graph.summary&&[r.from,r.to].some(id=>{const entity=graph.entities.find(e=>e.id===id);return entity&&Flow.isSubprocess(entity);});
+    return '<g data-from="'+h(r.from)+'" data-to="'+h(r.to)+'" class="'+(sub&&!highlight?'sub-edge ':related&&!highlight?'dimmed':'')+'"><path class="edge '+(r.type==='precedes'?'':'context-edge ')+(highlight?'highlighted':'')+'" d="'+path+'"></path><text class="edge-label" x="'+((a.x+b.x+220)/2)+'" y="'+(same?a.y+32:(startY+endY)/2-5)+'" text-anchor="middle">'+h(r.type)+'</text></g>';
   }).join('');
-  $('#nodeLayer').innerHTML=graph.entities.map(e=>{
+  $('#nodeLayer').innerHTML=(layout.frames||[]).map(f=>'<g class="universal-group" transform="translate('+f.x+' '+f.y+')"><rect class="universal-group-boundary" width="'+f.width+'" height="'+f.height+'" rx="16"></rect><g data-group-toggle="'+h(f.id)+'" tabindex="0" role="button" aria-expanded="true" aria-label="Collapse '+h(f.name)+'"><rect class="universal-group-heading" x="8" y="8" width="'+(f.width-16)+'" height="36" rx="8"></rect><text x="20" y="32">'+h(f.kind+' · '+f.name)+' −</text></g></g>').join('')+graph.entities.map(e=>{
     const p=pos[e.id], r=Flow.range(e), context=graph.context.has(e.id);
+    if(e.groupId)return '<g class="node summary-node" data-group-toggle="'+h(e.groupId)+'" tabindex="0" role="button" aria-label="Expand '+h(e.name)+'" transform="translate('+p.x+' '+p.y+')"><rect width="220" height="94"></rect><text class="node-name" x="14" y="39">'+h(short(e.name))+'</text><text class="node-meta" x="14" y="65">'+e.summaryCount+' objects · Expand</text></g>';
     if(graph.summary){
       const action=e.summaryKind==='workstream'?'data-summary-workstream="'+h(e.summaryCode)+'"':e.summaryKind==='part'?'data-summary-part="'+h(e.partId)+'"':e.summaryKind==='unassigned'?'data-summary-unassigned="true"':'data-summary-unlinked="true"';
       return '<g class="node summary-node '+(e.summaryKind==='workstream'&&!e.summaryCount?'empty-summary':'')+'" '+action+' tabindex="0" role="button" aria-label="Open '+h(e.name)+'" style="--node-color:'+(Model.COLORS[e.type]||'#1261d8')+'" transform="translate('+p.x+' '+p.y+')"><rect width="220" height="94"></rect><text class="summary-kind" x="14" y="20">'+h(e.summaryKind==='workstream'?'WORKSTREAM':e.summaryKind==='part'?e.type.toUpperCase():'UNLINKED')+'</text><text class="summary-count" x="204" y="20" text-anchor="end">'+h(e.summaryCount)+'</text><text class="node-name" x="14" y="48">'+h(short(e.name,27))+'</text><text class="summary-detail" x="14" y="72">'+h(short(e.summaryDetail,31))+'</text></g>';
@@ -497,6 +703,12 @@ function renderMap(invalid) {
     return '<g class="node '+(Flow.isSubprocess(e)?'subprocess ':'main-process ')+(graph.boundary?.has(e.id)?'boundary ':'')+(e.id===selectedId?'selected ':'')+(related&&!related.has(e.id)?'dimmed ':'')+(context?'outside-range':'')+'" data-select="'+e.id+'" tabindex="0" role="button" aria-pressed="'+(e.id===selectedId)+'" aria-label="'+h(e.type+': '+e.name)+'" style="--node-color:'+Model.COLORS[e.type]+'" transform="translate('+p.x+' '+p.y+')"><title>'+h(e.name+(context?' · Outside date range, predecessor':''))+'</title><rect width="220" height="94"></rect><rect class="cap" width="4" height="94"></rect><text class="node-type" x="14" y="19">'+h(graph.boundary?.has(e.id)?'LINKED · '+e.type:Flow.isSubprocess(e)?'SUB · '+(e.branchKind||'support'):e.type)+'</text><text class="node-name" x="14" y="39">'+h(short(e.name))+'</text><text class="node-meta" x="14" y="58">'+h(e.status.replaceAll('_',' '))+(context?' · date context':'')+'</text><text class="node-meta" x="14" y="74">'+h(date)+'</text><text class="node-phase" x="14" y="87">'+h(short(e.phase||'',32))+'</text></g>';
   }).join('');
 }
+function saveGlobalGroups(collapsed){
+  const data={collapsed};
+  (workspace.viewSettings[store.id] ||= {}).universalGroups=data;
+  if(!basicAccess&&workspace.access?.mode!=='project')LocalAPI.settings(store.id,'universalGroups',data).catch(error=>toast(error.message));
+}
+document.addEventListener('keydown',event=>{const node=event.target.closest?.('[data-group-toggle]');if(node&&['Enter',' '].includes(event.key)){event.preventDefault();node.dispatchEvent(new MouseEvent('click',{bubbles:true}));}});
 function applyZoom() {
   const svg=$('#ontologyMap');
   svg.setAttribute('viewBox','0 0 '+graphSize.width+' '+graphSize.height);
@@ -504,7 +716,33 @@ function applyZoom() {
   $('#mapZoomLevel').textContent=Math.round(zoom*100)+'%';
   $('#zoomOut').disabled=zoom<=.15;
 }
+function toggleMapObject(id) {
+  if(mapSelectedIds.has(id))mapSelectedIds.delete(id);else mapSelectedIds.add(id);
+  selectedId=null;$('#inspector').hidden=true;render();
+}
+function decorateMapSelection() {
+  const activeLayer=activeTab==='Overview'?$('#nodeLayer'):activeTab==='Production'?$('#productionNodes'):null;
+  if(activeLayer){const visible=new Set([...activeLayer.querySelectorAll('[data-select]')].map(node=>node.dataset.select));for(const id of mapSelectedIds)if(!visible.has(id))mapSelectedIds.delete(id);}
+  const related=Flow.selectionNeighborhood(store,mapSelectedIds),active=mapSelectedIds.size>0;
+  for(const layerId of ['nodeLayer','productionNodes'])for(const node of $('#'+layerId).querySelectorAll('[data-select]')){
+    node.querySelectorAll('.map-detail-button').forEach(button=>button.remove());
+    const id=node.dataset.select,selected=mapSelectedIds.has(id);
+    node.classList.toggle('selected',selected);node.setAttribute('aria-pressed',String(selected));
+    if(active){node.classList.remove('route-muted','dimmed');node.classList.toggle('selection-muted',!related.has(id));node.classList.toggle('selection-related',related.has(id)&&!selected);}
+    if(selected&&!basicAccess){
+      const button=document.createElementNS('http://www.w3.org/2000/svg','g');
+      button.setAttribute('class','map-detail-button');button.setAttribute('data-open-detail',id);button.setAttribute('role','button');button.setAttribute('tabindex','0');button.setAttribute('aria-label','Open details: '+Model.byId(store,id).name);
+      button.innerHTML='<circle cx="8" cy="0" r="12"></circle><text x="8" y="5" text-anchor="middle">?</text>';
+      node.appendChild(button);
+    }
+  }
+  if(active)for(const layerId of ['edgeLayer','productionEdges'])for(const edge of $('#'+layerId).querySelectorAll('[data-from][data-to]')){
+    const incident=mapSelectedIds.has(edge.dataset.from)||mapSelectedIds.has(edge.dataset.to);
+    edge.classList.remove('route-muted','dimmed');edge.classList.toggle('selection-muted',!incident);edge.classList.toggle('selection-edge',incident);
+  }
+}
 function selectEntity(id, jump=true) {
+  if(basicAccess){toggleMapObject(id);return;}
   const entity=Model.byId(store,id);if(!entity) return;
   selectedId=id;
   if(['Part','Part Revision'].includes(entity.type)) inspectorView='workflow';
@@ -559,7 +797,7 @@ function table(headers, rows) { return '<table><thead><tr>'+headers.map(v=>'<th 
 function renderStakeholders(invalid) {
   $('#stakeholderTabs').innerHTML=stakeholderViews.map(view=>'<button data-stakeholder-view="'+h(view)+'"'+(stakeholderView===view?' aria-current="page"':'')+'>'+h(view)+'</button>').join('');
   $('#stakeholderGroupLabel').hidden=stakeholderView!=='People & roles';
-  const all=(invalid?[]:Model.search(store,$('#searchInput').value)).filter(e=>['Person','Organization'].includes(e.type));
+  const all=recordEntities(invalid).filter(e=>['Person','Organization'].includes(e.type));
   const area=$('#stakeholderArea').value,areaOf=e=>e.type==='Organization'?'organization':e.workArea||'unknown';
   const areaPeople=all.filter(e=>!area||areaOf(e)===area);
   const departments=[...new Set(areaPeople.map(e=>e.type==='Organization'?'Organizations':e.department||'Department not recorded'))].sort();
@@ -608,6 +846,37 @@ function renderStakeholders(invalid) {
     }).join('')+'</div>';
   }
 }
+function renderCopilot(){
+  const state=copilotChats.get(store.id)||{messages:[],error:'',busy:false};
+  $('#copilotStatus').textContent=copilotConfigured?store.name+' · '+copilotModel:window.PUBLIC_READ_ONLY?'Copilot은 현재 로컬 앱에서 사용 가능합니다. 공개 사이트 AI 연결에는 별도 서버가 필요합니다.':'Not connected: set OPENAI_API_KEY in .env and restart the local server.';
+  $('#copilotSend').disabled=!copilotConfigured||state.busy;
+  $('#copilotSend').textContent=state.busy?'답변 중…':'보내기';
+  $('#copilotClear').disabled=state.busy;
+  $('#copilotQuestion').disabled=state.busy;
+  $('#copilotError').textContent=state.error;
+  $('#copilotMessages').innerHTML=state.messages.map(m=>'<article class="copilot-message '+h(m.role)+'"><strong>'+h(m.role==='user'?'You':'Copilot')+'</strong><p>'+h(m.content)+'</p>'+(m.references?.length?'<div class="copilot-references">'+m.references.map(e=>'<button class="button" data-select="'+h(e.id)+'">'+h(e.name)+'</button>').join('')+'</div>':'')+'</article>').join('');
+}
+$('#entryCopilot').onclick=()=>{activeTab='Copilot';render();};
+$('#copilotClear').onclick=()=>{copilotChats.delete(store.id);renderCopilot();};
+$('#copilotForm').onsubmit=async event=>{
+  event.preventDefault();if(!store||window.PUBLIC_READ_ONLY)return;
+  const id=store.id,question=$('#copilotQuestion').value.trim();
+  const state=copilotChats.get(id)||{messages:[],error:'',busy:false};
+  if(state.busy||!question||!copilotConfigured)return;
+  const history=state.messages.slice(-10).map(({role,content})=>({role,content}));
+  state.busy=true;state.error='';copilotChats.set(id,state);renderCopilot();
+  try{
+    const result=await LocalAPI.copilot({projectId:id,question,history,consent:true});
+    state.messages.push({role:'user',content:question},{role:'assistant',content:result.answer,references:result.references});
+    if(store?.id===id)$('#copilotQuestion').value='';
+  }catch(error){state.error=error.message;}
+  finally{state.busy=false;if(store?.id===id&&activeTab==='Copilot')renderCopilot();}
+};
+function recordEntities(invalid) {
+  if(invalid)return [];
+  const scope=selectedWorkstream?new Set(Flow.workstreamRecords(store,selectedWorkstream).map(e=>e.id)):null;
+  return Model.search(store,$('#searchInput').value).filter(e=>e.status!=='archived'&&(!scope||scope.has(e.id))&&Flow.overlaps(e,$('#dateStart').value,$('#dateEnd').value));
+}
 function renderRecords(invalid) {
   $('#stakeholderTabs').hidden=activeTab!=='Stakeholders';
   $('#stakeholderFilters').hidden=activeTab!=='Stakeholders';
@@ -618,8 +887,8 @@ function renderRecords(invalid) {
   $('#recordsAdd').textContent=activeTab==='Production'?(productionMode==='Process map'?'Add production step':'Add APQP object'):'Add object';
   if(activeTab==='Stakeholders') { renderStakeholders(invalid); return; }
   if(activeTab==='Production') { renderProduction(invalid); return; }
-  const entities=(invalid?[]:Model.search(store,$('#searchInput').value)).filter(e=>tabTypes[activeTab].includes(e.type)&&Flow.overlaps(e,$('#dateStart').value,$('#dateEnd').value));
-  $('#recordsTitle').textContent=activeTab+' · '+entities.length;
+  const entities=recordEntities(invalid).filter(e=>tabTypes[activeTab].includes(e.type));
+  $('#recordsTitle').textContent=(selectedWorkstream==='production'?'Production · ':'')+activeTab+' · '+entities.length;
   const notes={RACI:'Only explicitly recorded R/A/C/I assignments appear. Missing or multiple accountable people require review; affiliation never implies responsibility.',
     Resources:'Equipment and non-human resources. Connections show requirements, not reservations or calculated capacity conflicts.',
     Records:'Events are actual records; Evidence stores notes. Edits keep before/after values in each object’s detail history.'};
@@ -633,8 +902,9 @@ function renderRecords(invalid) {
     }));return;
   }
   if(activeTab==='Resources') {
+    const scopeIds=selectedWorkstream?new Set(Flow.workstreamRecords(store,selectedWorkstream).map(e=>e.id)):null;
     $('#recordsTable').innerHTML=table(['Resource','Kind / tier','Asset / model','Production use'],entities.map(e=>{
-      const steps=store.relations.filter(r=>r.type==='requires'&&r.to===e.id).map(r=>Model.byId(store,r.from)).filter(Boolean);
+      const steps=store.relations.filter(r=>r.type==='requires'&&r.to===e.id&&(!scopeIds||scopeIds.has(r.from))).map(r=>Model.byId(store,r.from)).filter(Boolean);
       return '<tr><td>'+link(e)+'</td><td>'+h(e.resourceKind||'Not classified')+'<small>'+h([e.machineMode==='shared_pool'?'Shared pool':e.machineMode==='specific_asset'?'Specific asset':'Use not classified',e.machineFamily,e.tier].filter(Boolean).join(' · '))+'</small></td><td>'+h(e.assetId||'No asset ID')+'<small>'+h([e.model,e.site].filter(Boolean).join(' · ')||'Model/site not recorded')+'</small></td><td>'+(steps.map(link).join('<br>')||'Not linked to a step')+'<small>'+h(e.capacityNote||'Capacity not recorded')+'</small></td></tr>';
     }));return;
   }
@@ -661,6 +931,21 @@ function applyProductionZoom() {
 }
 function showProductionRouteStart() {
   $('#productionMapStage').scrollLeft=0;
+}
+async function loadProjectMetrics(){
+  const projectId=store?.id;if(!projectId||projectId==='library')return;
+  const serial=++metricLoadSerial,snapshotId=selectedWipSnapshotId;
+  const results=await Promise.allSettled([
+    (async()=>{const latest=await LocalAPI.wipList(projectId);let history=latest;if(snapshotId&&snapshotId!==latest.selected){try{history=await LocalAPI.wipList(projectId,snapshotId);}catch{history=latest;}}return {latest,history};})(),
+    LocalAPI.staffingList(projectId),LocalAPI.productionStaffingList(projectId)
+  ]);
+  if(serial!==metricLoadSerial||store?.id!==projectId)return;
+  const [wip,staff,production]=results;
+  if(wip.status==='fulfilled'){wipData=wip.value.latest;wipHistoryData=wip.value.history;selectedWipSnapshotId=wipHistoryData.selected;}
+  if(staff.status==='fulfilled')staffingData=staff.value;
+  if(production.status==='fulfilled')productionStaffingData=production.value;
+  render();
+  results.forEach((result,i)=>{if(result.status==='rejected')$(['#wipError','#staffError','#productionStaffError'][i]).textContent=result.reason.message;});
 }
 async function loadWip(snapshotId='') {
   const projectId=store?.id;if(!projectId||projectId==='library')return;
@@ -763,11 +1048,13 @@ function renderStaffing() {
 }
 function renderProductionMap(invalid) {
   renderProductionPartOptions();
-  const projection=invalid?{nodes:[],edges:[],parts:[],unlinked:[]}:Flow.productionNetwork(store,{partIds:productionPartIds,start:$('#dateStart').value,end:$('#dateEnd').value});
-  productionSize=Flow.productionContextLayout(store,projection,{showMachines:$('#productionSeeMachines').checked,showComponents:$('#productionSeeComponents').checked});applyProductionZoom();
-  drawNetworkCanvas('production',projection,productionSize);
-  $('#productionCount').textContent=projection.parts.length+' Parts · '+projection.nodes.length+' distinct steps · '+projection.unlinked.length+' unlinked';
-  $('#productionEmpty').hidden=projection.nodes.length>0;
+  const projection=progressUI.filter('production',store,invalid&&!progressUI.enabled('production',store)?{nodes:[],edges:[],parts:[],unlinked:[]}:Flow.productionNetwork(store,{showStakeholders:hourlyUI.enabled('production',store)||$('#productionSeeStakeholders').checked,showLineReferences:!productionPartsCustomized,line:hourlyUI.enabled('production',store)&&store.name==='SMT'?'SMT':$('#productionLine').value,partIds:productionPartIds,start:progressUI.enabled('production',store)?'':$('#dateStart').value,end:progressUI.enabled('production',store)?'':$('#dateEnd').value}));
+  let shown=hourlyUI.graph('production',store,projection);
+  productionSize=hourlyUI.layout('production',store,shown,progressUI.layout('production',store,shown,Flow.productionContextLayout(store,shown,{showMachines:!progressUI.enabled('production',store)&&$('#productionSeeMachines').checked,showComponents:!progressUI.enabled('production',store)&&$('#productionSeeComponents').checked})));applyProductionZoom();
+  if(!progressUI.enabled('production',store)&&!hourlyUI.enabled('production',store)){const view=presentNetwork('production',shown,productionSize,productionPartsCustomized);shown=view.network;productionSize=view.layout;applyProductionZoom();}
+  drawNetworkCanvas('production',shown,productionSize);
+  $('#productionCount').textContent=projection.parts.length+' Parts · '+projection.nodes.filter(n=>n.entity.type==='Production Step').length+' steps · '+projection.nodes.filter(n=>n.entity.type!=='Production Step').length+' related objects · '+projection.unlinked.length+' unlinked';
+  $('#productionEmpty').hidden=shown.nodes.length>0;
 }
 function resetLogReview() {
   logDraft=null;$('#saveLogs').disabled=true;$('#logPreview').innerHTML='';$('#logError').textContent='';
@@ -886,6 +1173,13 @@ function renderInspector() {
   const e=Model.byId(store,selectedId); if(!e) { $('#inspector').hidden=true; return; }
   const relations=[...Model.relationsFor(store,e.id),...store.entities.filter(child=>child.parentWorkId&&(child.id===e.id||child.parentWorkId===e.id)).map(child=>({from:child.parentWorkId,to:child.id,type:'subprocess',evidence:child.branchKind||'support'}))];
   const meta=[['ID',e.id],['Status',e.status],['Phase',e.phase||'Unknown']];
+  if(e.type==='Person'){
+    const matches=workspace.library.entities.find(item=>item.id==='kakao-identity-review-20261015')?.identityReview?.mappings||[];
+    for(const match of matches.filter(item=>item.accountId===e.id||item.personId===e.id)){
+      const person=Model.byId(workspace.library,match.personId);
+      meta.push([match.status==='confirmed'?'Kakao identity · confirmed':'Kakao identity · needs confirmation',String(match.authorId)+' · '+(person?.name||'Unknown')+' · '+match.reason]);
+    }
+  }
   for(const key of [...Model.DATE_FIELDS,...Model.TEXT_FIELDS.filter(k=>!['phase','operatorAction','acceptanceCriteria','failureAction','rawLog'].includes(k))]) if(e[key]) meta.push([dateLabel(key),e[key]]);
   const changes=(store.changes||[]).filter(c=>c.entityId===e.id).slice().reverse();
   const local=Flow.localGraph(store,e.id,{depth:inspectorDepth,limit:18}),positions=new Map([[e.id,{x:280,y:145}]]),neighbors=local.nodes.filter(n=>n.id!==e.id);
@@ -905,17 +1199,34 @@ function renderInspector() {
     const metric=networkMetric(route,mode,highlight);
     routeInfo='<section class="inspector-section"><h3>Route &amp; observation</h3><p><strong>Parts:</strong> '+h(route.partIds.map(id=>Model.byId(store,id)?.name||id).join(', ')||'No linked Part')+'</p>'+(metric?'<p><strong>'+h(metric.text)+'</strong> · '+h(metric.title)+'</p>':'<p class="muted">Select Parts, Workers or Pending time in Show numbers.</p>')+'</section>';
   }
-  const overview='<p class="inspector-context">'+h(e.context||'No context recorded.')+'</p><p class="muted">Global object · in '+h(includedIn)+'</p>'+(store.id==='library'?'':'<p class="muted">Project workstreams: '+h(assignedLanes.join(', ')||'Unassigned · use Edit object to classify')+'</p>')+routeInfo+instructions+'<dl class="meta-grid">'+meta.map(([key,val])=>'<dt>'+h(key)+'</dt><dd>'+h(val)+'</dd>').join('')+'</dl>'+(e.rawLog?'<details class="raw-log"><summary>Original process log</summary><pre>'+h(e.rawLog)+'</pre></details>':'');
+  const risks=Flow.relatedRisks(store,e.id);
+  const riskDetails=risks.length?'<section class="inspector-section"><h3>Related risks / issues · '+risks.length+'</h3>'+risks.map(item=>'<button class="relation-card" data-select="'+h(item.id)+'"><small>'+h(item.type)+' · '+h(item.status)+'</small><strong>'+h(item.name)+'</strong><span>'+h(item.context)+'</span></button>').join('')+'</section>':'';
+  const overview='<p class="inspector-context">'+h(e.context||'No context recorded.')+'</p><p class="muted">Global object · in '+h(includedIn)+'</p>'+(store.id==='library'?'':'<p class="muted">Project workstreams: '+h(assignedLanes.join(', ')||'Unassigned · use Edit object to classify')+'</p>')+routeInfo+instructions+riskDetails+'<dl class="meta-grid">'+meta.map(([key,val])=>'<dt>'+h(key)+'</dt><dd>'+h(val)+'</dd>').join('')+'</dl>'+(e.rawLog?'<details class="raw-log"><summary>Original process log</summary><pre>'+h(e.rawLog)+'</pre></details>':'');
   const relationshipView='<div class="mini-map-controls"><button class="button" data-depth="1"'+(inspectorDepth===1?' aria-pressed="true"':'')+'>Direct</button><button class="button" data-depth="2"'+(inspectorDepth===2?' aria-pressed="true"':'')+'>Two hops</button><button id="openMainMap" class="text-button">Open in main map</button></div><svg class="mini-map" viewBox="0 0 560 290" role="img" aria-label="Relationships around '+h(e.name)+'"><defs><marker id="miniArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z"></path></marker></defs>'+edges+nodes+'</svg>'+(local.truncated?'<p class="muted">'+local.truncated+' more objects hidden. Open main map.</p>':'')+'<section class="inspector-section"><h3>Relationship list · '+relations.length+'</h3>'+relationshipList+(relations.length?'':'<p class="muted">No links yet. Use Input → Connect objects.</p>')+'</section>';
   const history='<section class="inspector-section"><h3>Edit history · '+changes.length+'</h3>'+changes.map(c=>{
     const fields=Object.keys(c.after||{}).filter(k=>JSON.stringify(c.before?.[k])!==JSON.stringify(c.after[k]));
     return '<div class="change-entry"><small>'+h(c.recordedAt)+'</small>'+fields.map(k=>'<p>'+h(dateLabel(k))+': '+h(c.before?.[k]||'Unknown')+' → '+h(c.after[k]||'Unknown')+'</p>').join('')+'</div>';
   }).join('')+(changes.length?'':'<p class="muted">No edits recorded.</p>')+'</section>';
   const isPart=['Part','Part Revision'].includes(e.type);
-  const workflow=isPart?partWorkflowHTML(e):'';
+  const workflow=isPart?riskDetails+partWorkflowHTML(e):'';
   const views={overview,workflow,relationships:relationshipView,history};
   const workflowButton=isPart?'<button data-inspector-view="workflow"'+(inspectorView==='workflow'?' aria-current="page"':'')+'>Workflow</button>':'';
   $('#inspectorContent').innerHTML='<span class="inspector-type" style="--entity-color:'+Model.COLORS[e.type]+'">'+h(e.type)+'</span><h2>'+h(e.name)+'</h2><nav class="inspector-tabs" aria-label="Object detail views"><button data-inspector-view="overview"'+(inspectorView==='overview'?' aria-current="page"':'')+'>Overview</button>'+workflowButton+['relationships','history'].map(view=>'<button data-inspector-view="'+view+'"'+(inspectorView===view?' aria-current="page"':'')+'>'+h(view)+'</button>').join('')+'</nav>'+views[inspectorView];
+  if(['overview','workflow'].includes(inspectorView)&&window.SamplePreparation.isSample(store)&&window.LocalAPI?.samplePreparationList){
+    const project=store,entityId=e.id,mount=document.createElement('section');mount.className='inspector-section';$('#inspectorContent').append(mount);
+    LocalAPI.samplePreparationList(project.id).then(sheets=>{
+      if(!mount.isConnected||store!==project||selectedId!==entityId)return;
+      const issues=sheets.flatMap(sheet=>sheet.answers.filter(a=>a.status==='issue'&&(sheet.partId===entityId||a.referenceIds?.includes(entityId))).map(answer=>({sheet,answer})));
+      if(!issues.length){mount.remove();return;}
+      mount.innerHTML='<h3>Sample preparation issues · '+issues.length+'</h3>'+issues.map(({sheet,answer})=>'<div class="relation-card"><small>'+h(sheet.runName)+' · '+h(Model.byId(project,sheet.partId)?.name||sheet.partId)+'</small><strong>'+h(SamplePreparation.questions(sheet).find(q=>q.id===answer.questionId)?.question||answer.questionId)+'</strong><span>'+h(answer.note||'No evidence note recorded.')+'</span></div>').join('')+'<button class="button" data-open-preparation>Open Sample Preparation Checksheet</button>';
+      mount.querySelector('[data-open-preparation]').onclick=()=>{activeTab='Risk / Issues';sampleRiskMode='preparation';selectedId=null;$('#inspector').hidden=true;render();};
+    }).catch(()=>{if(mount.isConnected)mount.remove();});
+  }
+  if(inspectorView==='overview'){
+    const contacts=Flow.reportingContacts(store,e.id),personButton=person=>'<button class="relation-card" data-select="'+h(person.id)+'"><strong>'+h(person.name)+'</strong><span>'+h(person.title||'Role member')+'</span></button>';
+    if(contacts.firstContacts.length)$('#inspectorContent').insertAdjacentHTML('beforeend','<section class="inspector-section"><h3>Report a problem · '+h(contacts.line.name)+'</h3><p>Contact the line Leader or Supervisor first. Either is a first reporting option; managers are later escalation.</p><p class="muted">Confirm who is on duty. Contact details and individual station responsibility are not confirmed; this is not an emergency procedure.</p>'+contacts.firstContacts.map(({group,members})=>'<h4><button class="text-button" data-select="'+h(group.id)+'">'+h(group.name)+'</button></h4>'+(members.length?members.map(personButton).join(''):'<p>Named contact not recorded. Find the on-duty Leader or Supervisor.</p>')).join('')+(contacts.laterManagers.length?'<details><summary>Later escalation · managers</summary>'+contacts.laterManagers.map(personButton).join('')+'</details>':'')+'</section>');
+    else if(['Production Step','Work Item'].includes(e.type)||e.type==='Resource'&&e.resourceKind==='line')$('#inspectorContent').insertAdjacentHTML('beforeend','<section class="inspector-section"><h3>Report a problem</h3><p>'+h(contacts.status==='ambiguous'?'Several lines are linked. Confirm the actual line, then contact its Leader or Supervisor first.':'Line Leader / Supervisor not confirmed for this object. Confirm the line and on-duty contact; do not assume a manager is the first contact.')+'</p></section>');
+  }
 }
 function entityFields() {
   const type=$('#entityType').value;
@@ -978,6 +1289,7 @@ function openEntity(id=null) {
   $('#partSide').value=e?.side||'';
   $('#verticalPosition').value=e?.verticalPosition||'';
   $('#pieceIndex').value=e?.pieceIndex||'';
+  $('#modelCode').value=e?.modelCode||'';$('#codeNamespace').value=e?.codeNamespace||'';
   for(const [field,key] of [['eventOccurredAt','occurredAt'],['eventLogKind','productionEventKind'],['eventTraceId','traceId'],['eventTraceKind','traceKind']])$('#'+field).value=e?.[key]||'';
   for(const key of ['apqpPhase','completionState','applicability','requirementSource','notApplicableReason','approvedBy','characteristicKind','classification','specification','tolerance','measurementMethod']) $('#'+key).value=e?.[key]||(['characteristicKind'].includes(key)?'product':key==='classification'?'normal':'');
   entityFields(); $('#parentWorkId').value=e?.parentWorkId||''; $('#entityDialog').showModal();
@@ -1074,9 +1386,24 @@ $('#lensAddUpdate').onclick=()=>{activeTab='Input';render();};
 $('#openHistory').onclick=()=>{selectedWorkstream='';activeTab='History';render();loadHistory(true);};
 $('#historyDate').onchange=()=>loadHistory(true);
 $('#historyMore').onclick=()=>loadHistory(false);
-$('#tabs').addEventListener('click',event=>{const button=event.target.closest('[data-tab]');if(button){selectedWorkstream='';activeTab=button.dataset.tab;if(activeTab==='Production')productionMode='Process map';if(activeTab==='Overview')restoreMapSettings('overview');render();if(activeTab==='Production')showProductionRouteStart();if(activeTab==='History')loadHistory(true);}});
+$('#tabs').addEventListener('click',event=>{const button=event.target.closest('[data-tab]');if(button){if(selectedWorkstream!=='production')selectedWorkstream='';activeTab=button.dataset.tab;selectedId=null;$('#inspector').hidden=true;if(activeTab==='Production')productionMode='Process map';if(activeTab==='Overview')restoreMapSettings(selectedWorkstream?'lens-'+selectedWorkstream:'overview');render();if(activeTab==='Production')showProductionRouteStart();if(activeTab==='History')loadHistory(true);}});
 $('.input-choices').addEventListener('click',event=>{const button=event.target.closest('[data-input-mode]');if(button)setInputMode(button.dataset.inputMode);});
-document.addEventListener('click',event=>{const node=event.target.closest('[data-select]');if(node&&store){if(node.dataset.inspectorNeighbor)inspectorView='relationships';selectEntity(node.dataset.select,!node.closest('#scheduleContent'));}});
+document.addEventListener('click',event=>{
+  if(!store)return;
+  const detail=event.target.closest('[data-open-detail]');
+  if(detail){inspectorView='overview';selectEntity(detail.dataset.openDetail,false);return;}
+  const group=event.target.closest('[data-group-toggle]');
+  if(group){
+    const current=workspace.viewSettings?.[store.id]?.universalGroups?.collapsed;
+    const defaultFolded=[...document.querySelectorAll('#nodeLayer .collapsed-map-group,#productionNodes .collapsed-map-group')].map(n=>n.dataset.groupToggle);
+    const collapsed=new Set(current||defaultFolded),id=group.dataset.groupToggle;
+    collapsed.has(id)?collapsed.delete(id):collapsed.add(id);saveGlobalGroups([...collapsed]);selectedId=null;$('#inspector').hidden=true;render();return;
+  }
+  const quality=event.target.closest('[data-quality-toggle]');
+  if(quality){const key=quality.dataset.qualityToggle;if(qualityExpanded.has(key)){qualityExpanded.delete(key);mapSelectedIds.delete(quality.dataset.select);}else{qualityExpanded.add(key);mapSelectedIds.add(quality.dataset.select);}selectedId=null;$('#inspector').hidden=true;render();return;}
+  const node=event.target.closest('[data-select]');
+  if(node){if(node.closest('#nodeLayer,#productionNodes')){toggleMapObject(node.dataset.select);return;}if(node.dataset.inspectorNeighbor)inspectorView='relationships';selectEntity(node.dataset.select,!node.closest('#scheduleContent'));}
+});
 $('#inspector').addEventListener('click',event=>{const view=event.target.closest('[data-inspector-view]');if(view){inspectorView=view.dataset.inspectorView;renderInspector();return;}const depth=event.target.closest('[data-depth]');if(depth){inspectorDepth=Number(depth.dataset.depth);renderInspector();return;}if(event.target.closest('#openMainMap')){selectedWorkstream='';activeTab='Overview';restoreMapSettings('overview');$('#focusMode').value='direct';render();saveViewSettings('overview');}if(event.target.closest('#openPartProduction')){const chosen=Model.byId(store,selectedId),route=Model.isProductPart(chosen)?chosen:Model.byId(store,store.relations.find(relation=>relation.to===selectedId&&relation.routePartId)?.routePartId);if(!Model.isProductPart(route)){toast('This Component has no linked product route yet.');return;}selectedWorkstream='';activeTab='Production';productionMode='Process map';productionPartIds=[route.id];productionPartsCustomized=true;render();showProductionRouteStart();saveViewSettings('production');}});
 $('#inspector').addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){const node=event.target.closest('[data-inspector-neighbor]');if(node){event.preventDefault();selectEntity(node.dataset.select,false);}}});
 function openSummary(node) {
@@ -1086,8 +1413,8 @@ function openSummary(node) {
   if(node.dataset.summaryUnlinked){selectedWorkstream='';activeTab='Production';productionMode='Process map';productionPartsCustomized=false;render();showProductionRouteStart();}
 }
 $('#nodeLayer').addEventListener('click',event=>{const node=event.target.closest('[data-summary-workstream],[data-summary-part],[data-summary-unassigned],[data-summary-unlinked]');if(node)openSummary(node);});
-$('#nodeLayer').addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){const node=event.target.closest('[data-summary-workstream],[data-summary-part],[data-summary-unassigned],[data-summary-unlinked],[data-select]');if(!node)return;event.preventDefault();if(node.dataset.select)selectEntity(node.dataset.select);else openSummary(node);}});
-$('#productionNodes').addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){const node=event.target.closest('[data-select]');if(node){event.preventDefault();selectEntity(node.dataset.select);}}});
+$('#nodeLayer').addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){const node=event.target.closest('[data-open-detail],[data-summary-workstream],[data-summary-part],[data-summary-unassigned],[data-summary-unlinked],[data-select]');if(!node)return;event.preventDefault();node.dispatchEvent(new MouseEvent('click',{bubbles:true}));}});
+$('#productionNodes').addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){const node=event.target.closest('[data-open-detail],[data-select]');if(node){event.preventDefault();node.dispatchEvent(new MouseEvent('click',{bubbles:true}));}}});
 document.addEventListener('keydown',event=>{
   if(event.key==='Escape'&&!document.querySelector('dialog[open]')) $('#inspector').hidden=true;
   if(store&&event.key==='/'&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)){event.preventDefault();$('#searchInput').focus();}
@@ -1101,7 +1428,7 @@ $('#mapPartMulti').addEventListener('click',event=>{
   const only=event.target.closest('[data-map-only]'),action=event.target.closest('[data-map-parts-action]');if(!only&&!action)return;
   const all=store.entities.filter(item=>['Part','Part Revision'].includes(item.type)).map(item=>item.id);
   mapPartsCustomized=action?.dataset.mapPartsAction!=='all';mapPartIds=only?[only.dataset.mapOnly]:action.dataset.mapPartsAction==='all'?all:[];
-  selectedId=null;$('#inspector').hidden=true;render();saveViewSettings('lens-production');if(only)$('#mapPartMulti').open=false;
+  selectedId=null;$('#inspector').hidden=true;render();saveViewSettings(mapViewKey());if(only)$('#mapPartMulti').open=false;
 });
 $('#productionPartMulti').addEventListener('click',event=>{
   const only=event.target.closest('[data-production-only]'),action=event.target.closest('[data-production-parts-action]');if(!only&&!action)return;
@@ -1109,13 +1436,14 @@ $('#productionPartMulti').addEventListener('click',event=>{
   productionPartsCustomized=action?.dataset.productionPartsAction!=='all';productionPartIds=only?[only.dataset.productionOnly]:action.dataset.productionPartsAction==='all'?all:[];
   render();saveViewSettings('production');if(only)$('#productionPartMulti').open=false;
 });
-$('#mapPartChoices').addEventListener('change',event=>{const id=event.target.dataset.mapPartChoice;if(!id)return;mapPartsCustomized=true;if(event.target.checked){if(!mapPartIds.includes(id))mapPartIds.push(id);if(!mapPartId)mapPartId=id;}else{mapPartIds=mapPartIds.filter(item=>item!==id);if(mapPartId===id)mapPartId=mapPartIds[0]||'';}selectedId=null;$('#focusMode').value='';$('#inspector').hidden=true;render();saveViewSettings('lens-production');});
+$('#mapPartChoices').addEventListener('change',event=>{const id=event.target.dataset.mapPartChoice;if(!id)return;mapPartsCustomized=true;if(event.target.checked){if(!mapPartIds.includes(id))mapPartIds.push(id);if(!mapPartId)mapPartId=id;}else{mapPartIds=mapPartIds.filter(item=>item!==id);if(mapPartId===id)mapPartId=mapPartIds[0]||'';}selectedId=null;$('#focusMode').value='';$('#inspector').hidden=true;render();saveViewSettings(mapViewKey());});
 $('#productionPartChoices').addEventListener('change',event=>{const id=event.target.dataset.productionPartChoice;if(!id)return;productionPartsCustomized=true;if(event.target.checked){if(!productionPartIds.includes(id))productionPartIds.push(id);}else productionPartIds=productionPartIds.filter(item=>item!==id);render();saveViewSettings('production');});
 $('#showNumbers').addEventListener('change',()=>{render();saveViewSettings(mapViewKey());});
 $('#productionNumbers').addEventListener('change',()=>{render();saveViewSettings('production');});
 $('#mapHighlight').addEventListener('change',()=>{mapHighlightPartId=$('#mapHighlight').value;selectedId=null;$('#inspector').hidden=true;$('#focusMode').value='';render();focusPartInMap('overview',mapHighlightPartId);saveViewSettings('lens-production');});
 $('#productionHighlight').addEventListener('change',()=>{productionHighlightPartId=$('#productionHighlight').value;selectedId=null;$('#inspector').hidden=true;render();focusPartInMap('production',productionHighlightPartId);saveViewSettings('production');});
 $('#productionLine').addEventListener('change',event=>{const nextLine=event.target.value,previousLine=$('#productionLine').dataset.previous||'';productionSelections[previousLine||'all']={partIds:[...productionPartIds],partSelectionCustomized:productionPartsCustomized,highlightPartId:productionHighlightPartId};const saved=productionSelections[nextLine||'all'];productionPartsCustomized=saved?.partSelectionCustomized===true;productionPartIds=productionPartsCustomized?[...(saved?.partIds||[])]:[];productionHighlightPartId=saved?.highlightPartId||'';$('#productionLine').dataset.previous=nextLine;render();showProductionRouteStart();saveViewSettings('production');});
+$('#mapProductionLine').addEventListener('change',()=>{mapPartsCustomized=false;mapPartIds=[];mapHighlightPartId='';selectedId=null;$('#inspector').hidden=true;render();$('#mapStage').scrollTop=0;$('#mapStage').scrollLeft=0;saveViewSettings('lens-production');});
 for(const id of ['productionSeeMachines','productionSeeComponents'])$('#'+id).addEventListener('change',()=>{render();saveViewSettings('production');});
 for(const id of ['mapSeeMachines','mapSeeComponents'])$('#'+id).addEventListener('change',()=>{render();saveViewSettings(mapViewKey());});
 $('#addProductionExcel').onclick=()=>{productionMode='WIP snapshots';render();$('#wipFile').focus();};
@@ -1126,7 +1454,8 @@ $('#perspective').addEventListener('change',()=>{types=new Set(presets[$('#persp
 $('#allTypes').onclick=()=>{types=new Set(allTypes);renderTypeFilters();render();saveViewSettings(mapViewKey());};
 $('#noTypes').onclick=()=>{types.clear();renderTypeFilters();render();saveViewSettings(mapViewKey());};
 $('#resetFilters').onclick=()=>{resetFilters();if(selectedWorkstream){types=new Set(allTypes);renderTypeFilters();}render();saveViewSettings(mapViewKey());};
-$('#clearSelection').onclick=()=>{selectedId=null;$('#focusMode').value='';$('#inspector').hidden=true;render();};
+$('#clearSelection').onclick=()=>{mapSelectedIds.clear();selectedId=null;$('#focusMode').value='';$('#inspector').hidden=true;render();};
+$('#productionClearSelection').onclick=$('#clearSelection').onclick;
 $('#closeInspector').onclick=()=>{$('#inspector').hidden=true;};
 $('#zoomIn').onclick=()=>{zoom=Math.min(2,zoom*1.2);applyZoom();saveViewSettings(mapViewKey());};
 $('#zoomOut').onclick=()=>{zoom=Math.max(.15,zoom/1.2);applyZoom();saveViewSettings(mapViewKey());};
@@ -1249,6 +1578,7 @@ $('#entityForm').addEventListener('submit',async event=>{
     if(['Part','Part Revision'].includes(input.type)){
       input.productionFamily=$('#productionFamily').value.trim();
       for(const [field,key] of [['itemKind','itemKind'],['productFamily','productFamily'],['partSide','side'],['verticalPosition','verticalPosition'],['pieceIndex','pieceIndex']])input[key]=$('#'+field).value.trim();
+      input.modelCode=$('#modelCode').value.trim();input.codeNamespace=$('#codeNamespace').value.trim();
     }
     if(input.type==='Production Step') for(const key of ['operationCode','productionStage','workCenter','operatorAction','acceptanceCriteria','failureAction']) input[key]=$('#'+key).value;
     if(input.type==='Event')for(const [field,key] of [['eventOccurredAt','occurredAt'],['eventLogKind','productionEventKind'],['eventTraceId','traceId'],['eventTraceKind','traceKind']])input[key]=$('#'+field).value.trim();
@@ -1426,11 +1756,21 @@ $('#revertSavedChange').onclick=async ()=>{
   }catch(error){$('#savedChangeError').textContent=error.message;}
   finally{$('#revertSavedChange').disabled=false;}
 };
-$('#exportButton').onclick=async()=>{try{if(LocalAPI.exportBackup)await LocalAPI.exportBackup();else window.location.href='/api/export';}catch(error){toast(error.message);}};
 $('#projectForm').onsubmit=async event=>{
-  event.preventDefault();try{const project=Projects.create($('#projectName').value),next=structuredClone(workspace);next.projects.push(project);await commit(next);event.target.reset();location.hash='/projects/'+project.id;}
+  event.preventDefault();try{const project=Projects.create($('#projectName').value,$('#newProjectType').value),next=structuredClone(workspace);if(LocalAPI.projectAccessSave){workspace=await LocalAPI.projectAccessSave({projectId:project.id,newProject:project,password:$('#projectViewerPassword').value});}else{next.projects.push(project);await commit(next);}event.target.reset();location.hash='/projects/'+project.id;}
   catch(error){$('#projectError').textContent=error.message;}
 };
+function projectPasswordDialog(id){
+ const d=document.createElement('dialog');d.className='access-dialog';d.innerHTML='<form><h2>'+h(workspace.projects.find(p=>p.id===id)?.name||'프로젝트')+' · 조회 접속</h2><label>프로젝트 비밀번호<input type="password" required minlength="4" autocomplete="current-password"></label><p>해당 프로젝트 조회만 가능합니다.</p><p class="form-error" role="alert"></p><button class="button primary" type="submit">열기</button><button class="button" type="button" data-close>닫기</button></form>';document.body.append(d);d.onclose=()=>d.remove();d.querySelector('[data-close]').onclick=()=>{d.close();location.hash='/projects';};d.querySelector('form').onsubmit=async e=>{e.preventDefault();const b=d.querySelector('[type=submit]');b.disabled=true;try{workspace=await LocalAPI.projectLogin(id,d.querySelector('input').value);basicAccess=false;d.close();OwnerAccess.init(workspace.access,{whole:openWholeProcess,production:()=>openWorkstream('production')});route();}catch(err){d.querySelector('[role=alert]').textContent=err.message;b.disabled=false;}};d.showModal();
+}
+if(window.CLOUD_BACKEND&&LocalAPI.projectAccessSave){
+ const field=document.createElement('label');field.innerHTML='프로젝트 조회 비밀번호 · 4자 이상<input id="projectViewerPassword" type="password" minlength="4" maxlength="256" autocomplete="new-password" placeholder="비워두면 공개 조회">';$('#projectForm').append(field);
+ const button=document.createElement('button');button.className='button project-access-settings';button.textContent='프로젝트 접속 설정';$('#projectBar').append(button);
+ button.onclick=()=>{
+  if(!store||workspace.access?.mode!=='owner'){toast('내 전용에서 프로젝트를 열어 설정하세요.');return;}
+  const id=store.id,d=document.createElement('dialog');d.className='access-dialog';d.innerHTML='<form><h2>'+h(store.name)+' · 조회 접속 설정</h2><label>새 프로젝트 비밀번호<input type="password" minlength="4" maxlength="256" autocomplete="new-password" placeholder="4자 이상 · 비워두면 공개 조회"></label><p>새 비밀번호 저장 시 이전 비밀번호 접근은 차단됩니다. 현재 프로젝트 조회 데이터도 함께 갱신합니다. 내 전용 비밀번호는 바뀌지 않습니다.</p><p role="alert" class="form-error"></p><button type="submit" class="button primary">저장</button><button type="button" data-close class="button">닫기</button></form>';document.body.append(d);d.onclose=()=>d.remove();d.querySelector('[data-close]').onclick=()=>d.close();d.querySelector('form').onsubmit=async e=>{e.preventDefault();const password=d.querySelector('input').value;if(!password&&!confirm('비밀번호 없이 이 프로젝트를 누구나 조회하게 할까요?'))return;const b=d.querySelector('[type=submit]');b.disabled=true;try{workspace=await LocalAPI.projectAccessSave({projectId:id,password});store=workspace.projects.find(p=>p.id===id);d.close();render();toast('프로젝트 접속 설정 저장 완료');}catch(err){d.querySelector('[role=alert]').textContent=err.message;b.disabled=false;}};d.showModal();
+ };
+}
 $('#homeButton').onclick=()=>{location.hash='/projects';};
 $('#renameProject').onclick=async ()=>{
   const name=prompt('Project name',store.name);if(name===null)return;
@@ -1440,4 +1780,31 @@ $('#archiveProject').onclick=async ()=>{
   try{const next=structuredClone(workspace),p=next.projects.find(p=>p.id===store.id);p.status=p.status==='archived'?'active':'archived';await commit(next);render();}catch(error){toast(error.message);}
 };
 window.addEventListener('hashchange',route);
+function mapAssistantScope(){
+  if(basicAccess||!store||!['Overview','Production'].includes(activeTab)||activeTab==='Production'&&productionMode!=='Process map')return null;
+  const production=activeTab==='Production',layer=production?'productionNodes':'nodeLayer';
+  const line=production?$('#productionLine').value:selectedWorkstream==='production'?$('#mapProductionLine').value:'';
+  const visibleIds=store.id==='library'||!selectedWorkstream&&!production?null:[...new Set([...$('#'+layer).querySelectorAll('[data-select]')].map(e=>e.dataset.select))];
+  return {scopeId:store.id,visibleIds,configured:mapAssistantConfigured,key:store.id+'/'+activeTab+'/'+selectedWorkstream+'/'+line+'/'+(visibleIds||[]).slice().sort().join(','),title:store.name+(line?' · '+line:'')+(selectedWorkstream?' · '+selectedWorkstream:production?' · Production':' · 전체 온톨로지')};
+}
+function focusMapSelection(kind){
+  const production=kind==='production',stage=$(production?'#productionMapStage':'#mapStage'),layer=$(production?'#productionNodes':'#nodeLayer');
+  const nodes=[...layer.querySelectorAll('[data-select]')],selected=nodes.filter(n=>mapSelectedIds.has(n.dataset.select)),targets=selected.length?selected:nodes.slice(0,1);if(!targets.length)return;
+  const boxes=targets.map(n=>{const b=n.getBBox(),m=n.transform.baseVal.consolidate()?.matrix;return {x:b.x+(m?.e||0),y:b.y+(m?.f||0),width:b.width,height:b.height};});
+  const left=Math.min(...boxes.map(b=>b.x)),top=Math.min(...boxes.map(b=>b.y)),right=Math.max(...boxes.map(b=>b.x+b.width)),bottom=Math.max(...boxes.map(b=>b.y+b.height));
+  const scale=Math.max(.8,Math.min(1.3,(stage.clientWidth-64)/Math.max(1,right-left),(stage.clientHeight-64)/Math.max(1,bottom-top)));
+  if(production){productionZoom=scale;applyProductionZoom();}else{zoom=scale;applyZoom();}
+  stage.scrollTo({left:Math.max(0,(left+right)/2*scale-stage.clientWidth/2),top:Math.max(0,(top+bottom)/2*scale-stage.clientHeight/2),behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+}
+function highlightAssistantObjects(ids){
+  const valid=ids.filter(id=>Model.byId(store,id));if(!valid.length)return;
+  if(store.id==='library'){const settings=workspace.viewSettings?.library?.universalGroups;if(settings)settings.collapsed=(settings.collapsed||[]).filter(group=>!(historyGroups[group]||[]).some(id=>valid.includes(id)));}
+  mapSelectedIds.clear();valid.forEach(id=>mapSelectedIds.add(id));selectedId=null;$('#inspector').hidden=true;render();
+  const layer=activeTab==='Production'?$('#productionNodes'):$('#nodeLayer'),shown=new Set([...layer.querySelectorAll('[data-select]')].map(n=>n.dataset.select));
+  const hidden=valid.filter(id=>!shown.has(id));
+  for(const id of hidden)for(const r of store.relations){const next=r.from===id?r.to:r.to===id?r.from:null;if(shown.has(next))mapSelectedIds.add(next);}
+  decorateMapSelection();if(hidden.length)toast(hidden.length+'개 객체는 현재 필터에서 숨겨져 있습니다. 표시된 관련 객체를 강조합니다.');
+  requestAnimationFrame(()=>focusMapSelection(activeTab==='Production'?'production':'overview'));
+}
+const mapAssistantUI=new window.MapAssistantView({getScope:mapAssistantScope,ask:input=>LocalAPI.mapAssistant(input),highlight:highlightAssistantObjects});
 setInputMode(inputMode); route(); startLocal();

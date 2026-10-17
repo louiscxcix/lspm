@@ -1,6 +1,6 @@
 'use strict';
 const Projects=require('./projects');
-const TABLES={projects:'projects',entities:'entities',memberships:'project_memberships',assessments:'project_assessments',projectSchedules:'project_schedules',workstreams:'project_workstreams',relations:'relations',viewSettings:'project_view_settings',changes:'entity_changes',sources:'sources',ingestionJobs:'ingestion_jobs',changeSets:'change_sets',wipSnapshots:'wip_snapshots',wipCounts:'wip_counts',staffingCounts:'staffing_counts',productionStaffingCounts:'production_staffing_counts'};
+const TABLES={hourlyRecords:'hourly_records',samplePreparationRecords:'sample_preparation_records',projects:'projects',entities:'entities',memberships:'project_memberships',assessments:'project_assessments',projectSchedules:'project_schedules',workstreams:'project_workstreams',relations:'relations',viewSettings:'project_view_settings',changes:'entity_changes',sources:'sources',ingestionJobs:'ingestion_jobs',changeSets:'change_sets',wipSnapshots:'wip_snapshots',wipCounts:'wip_counts',staffingCounts:'staffing_counts',productionStaffingCounts:'production_staffing_counts'};
 
 // Run only inside withPostgresStore, so import is atomic, owner-scoped and locked.
 async function importBackup(store,client,backup) {

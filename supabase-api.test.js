@@ -54,6 +54,16 @@ test('browser: Supabase login, authenticated project saves, reload, export and l
   const download=await downloadPromise;const exported=JSON.parse(fs.readFileSync(await download.path(),'utf8'));assert.equal(exported.projects[0].name,'Supabase project');
   await page.locator('#cloudSignOut').click();await page.locator('#cloudSignIn').waitFor({state:'visible'});
   assert.equal(await page.evaluate(()=>sessionStorage.getItem('pm-session:ahzpuefosoajwwgbfhng.supabase.co')),null);
+  // Latest production views read real persisted records through the public cloud API.
+  const M=require('./ontology-model'),S=require('./sample-preparation');
+  let w=store.load();const p=w.projects[0];p.projectType='sample';
+  const part=M.addEntity(p,{type:'Part',name:'Latest browser model',itemKind:'product'}),step=M.addEntity(p,{type:'Production Step',name:'Latest browser step'});
+  M.addRelation(p,{type:'applies_to',from:step.id,to:part.id});p.workstreams={[part.id]:['production'],[step.id]:['production']};
+  w=store.save(w,p.id,w.revision);store.featureSave({projectId:p.id,revision:w.revision,features:{wip:true,hourly:true}});w=store.load();
+  const date=require('./hourly').productionDay(new Date()),start=date+'T09:00:00-06:00',end=date+'T10:00:00-06:00';
+  store.hourlySave({projectId:p.id,revision:w.revision,text:'Private hourly source',rows:[{measurementKind:'model',partId:part.id,unit:'pcs',start,end,actual:80,target:100}]});w=store.load();
+  store.saveWip({projectId:p.id,revision:w.revision,capturedAt:new Date(start).toISOString(),filename:'fixture.xlsx',sheet:'WIP',rows:[{row:1,column:2,partName:part.name,partId:part.id,stage:step.name,stepId:step.id,quantity:0}]});w=store.load();
+  store.samplePreparationSave({projectId:p.id,revision:w.revision,sheet:S.create(w.projects[0],{partId:part.id,runName:'Latest browser trial'})});
   await page.goto(base+'/?cloud=1');
   await page.waitForFunction(()=>workspace?.projects.some(p=>p.name==='Supabase project'));
   assert.equal(await page.locator('#cloudSignIn').count(),0);
@@ -61,5 +71,20 @@ test('browser: Supabase login, authenticated project saves, reload, export and l
   assert.equal(await page.locator('#exportButton').isVisible(),false);
   assert.ok(guestReads>=2);
   assert.match(await page.locator('#storageNote').textContent(),/Public workspace/);
+  assert.equal(await page.locator('#projectTypeFilter').isVisible(),true);
+  await page.locator('#projectList a').first().click();
+  await page.locator('[data-workstream="production"]').click();
+  await page.locator('[data-hourly-toggle]').click();
+  await page.waitForFunction(()=>document.querySelector('[data-hourly-charts]')?.textContent.includes('80'));
+  assert.equal(await page.locator('[data-hourly-input]').isVisible(),false);
+  await page.locator('[data-hourly-toggle]').click();
+  await page.locator('[data-progress-toggle]').click();
+  await page.waitForFunction(()=>progressUI.data?.rows.some(row=>row.quantity===0));
+  assert.equal(await page.locator('[data-progress-add]').isVisible(),false);
+  await page.locator('[data-tab="Risk / Issues"]').click();
+  await page.locator('[data-sample-risk="preparation"]').click();
+  await page.locator('[data-sample-print]').waitFor({state:'visible'});
+  assert.match(await page.locator('#samplePreparationPanel').textContent(),/Latest browser trial/);
+  assert.equal(await page.locator('[data-sample-new]').isVisible(),false);
   assert.deepEqual(errors,[]);
 });

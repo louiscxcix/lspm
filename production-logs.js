@@ -26,7 +26,7 @@
     if(Object.values(columns).some(value=>!value))return {rows:[],rawOnly:true,note:'Source will be saved as raw evidence. Map its columns later to trace ID, operation, event and timestamp.'};
     const steps=stepsForPart(project,partId);
     const rows=parsed.rows.map((input,index)=>{
-      const label=input[columns.step],matches=label?.trim()?steps.filter(step=>step.id===label||normalized(step.name)===normalized(label)||step.productionStage&&normalized(step.productionStage)===normalized(label)):[];
+      const label=input[columns.step],matches=label?.trim()?steps.filter(step=>step.id===label||normalized(step.name)===normalized(label)||step.productionStage&&normalized(step.productionStage)===normalized(label)||step.displayProcessName&&normalized(step.displayProcessName)===normalized(label)):[];
       const row={row:index+2,traceId:input[columns.traceId],stepId:matches.length===1?matches[0].id:'',stepLabel:label,kind:kinds[normalized(input[columns.kind])]||input[columns.kind],occurredAt:input[columns.occurredAt],include:true};
       row.error=rowError(project,partId,row);return row;
     });
