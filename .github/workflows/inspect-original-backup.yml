@@ -36,6 +36,7 @@ jobs:
         env:
           LSPM_DB_BACKUP_KEY: ${{ secrets.LSPM_DB_BACKUP_KEY }}
       - name: Save schema and count report only
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: original-backup-metadata
@@ -45,6 +46,7 @@ jobs:
 
   publish-metadata:
     needs: inspect
+    if: always() && !cancelled()
     runs-on: ubuntu-24.04
     permissions:
       contents: write

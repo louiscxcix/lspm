@@ -43,6 +43,11 @@ if(require.main===module){
     fs.writeFileSync(output,JSON.stringify(report,null,2),{mode:0o600,flag:'wx'});
     console.log('Backup verified: revision '+report.revision+', '+report.tables.entities.count+' objects, '+report.tables.relations.count+' relations, '+report.tables.projects.count+' projects. No records imported.');
     if(process.env.GITHUB_STEP_SUMMARY)fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,'\n## Original database backup verified\n\nChecksums, SQLite integrity and foreign keys passed. No data has been imported into Supabase.\n\n| Table | Records |\n| --- | ---: |\n'+Object.entries(report.tables).map(([name,t])=>'| '+name+' | '+t.count+' |').join('\n')+'\n');
-  }catch(error){console.error(error.message);process.exitCode=1;}
+  }catch(error){
+    console.error(error.message);
+    const output=process.argv[3];
+    if(output&&!fs.existsSync(output))fs.writeFileSync(output,JSON.stringify({status:'failed',diagnostic:error.message},null,2),{mode:0o600,flag:'wx'});
+    process.exitCode=1;
+  }
 }
 module.exports={inspectEncryptedBackup};
