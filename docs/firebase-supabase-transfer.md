@@ -23,6 +23,8 @@ node publish-supabase.js
 node publish-supabase.js --status
 ```
 
+Before reviewing personnel information, run `node people-context.js` and inspect the private `../.local-data/people-context-review.json`. It exposes recorded titles, teams, line/work links, reporting links, evidence-verified account mappings, and source references for named mentions. It never turns a name match into confirmed identity or employment, and never modifies the database by itself.
+
 The publisher reads the local SQLite database without modifying it. The local capability is in `../.local-data/supabase-publisher.json` with mode 0600; it is not a Supabase service-role credential and is never committed. The capability authorizes only the pinned owner workspace's source/ontology/membership publication functions. It cannot reset passwords, write production quantities, edit project settings, delete records, or read another workspace.
 
 Sources and relationships are append-only. Existing Person, Organization, Evidence, and Event records may change only when their previously confirmed preimage still matches; other existing production objects cannot be changed by this capability. Conflicts are retained for review. Request keys make uncertain retries idempotent. Local publication state advances only for acknowledged records; failed and conflicting records remain retryable. Collection checkpoints and Supabase publication checkpoints are separate.
