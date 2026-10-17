@@ -1,6 +1,14 @@
 # Supabase migration
 
-Target project: `ahzpuefosoajwwgbfhng`. The frontend uses its public publishable key in `supabase-config.js`; that key is not a password. GitHub Pages serves the application and Supabase Auth, PostgreSQL and the `ontology` Edge Function provide private, editable workspaces. No Firebase deployment is involved.
+Target project: `ahzpuefosoajwwgbfhng`. The frontend uses its public publishable key in `supabase-config.js`; that key is not a password. GitHub Pages serves the application and Supabase Auth, PostgreSQL and the `ontology` Edge Function provide storage and editing. The normal URL now opens a public read-only workspace without login. No Firebase deployment is involved.
+
+## Public viewing
+
+`https://louiscxcix.github.io/lspm/` displays the published workspace without a sign-in panel. Public API endpoints allow only reads of the published graph and its WIP/staffing observations. Source-file bytes, raw logs, source excerpts, exports, audit diffs and all write operations are excluded. Public database requests use a read-only transaction under the pinned owner's restricted database role. Query parameters cannot select other users' records.
+
+Migration `202610170001_public_workspace.sql` pins the single populated account if one exists. With no populated account it uses the sole existing Auth user, or creates an empty, dedicated publication scope if there is no unambiguous user. If multiple populated accounts already exist, deployment stops rather than exposing all accounts. The original SQLite records are still not imported automatically.
+
+Editing remains available at `https://louiscxcix.github.io/lspm/?edit=1` and requires sign-in. If publication was initialized before an editor account existed, first create/sign in to the editor account, then use the Supabase SQL editor to set `pm.publication.owner_id` to that account's Auth UUID. That is an administrator-only selection, never a browser parameter. To withdraw publication, remove the row from `pm.publication`; changing browser configuration alone does not revoke the public API.
 
 ## Current status
 
@@ -19,7 +27,7 @@ npm run build:cloud
 
 Set `SUPABASE_ACCESS_TOKEN` securely before running the deployment script. Obtain a personal access token with access to this project through your Supabase account settings. Do not commit it, put it in browser configuration, or paste it into chat. The script applies ordered SQL migrations through the Supabase Management API and deploys the Edge Function using the pinned official Supabase CLI. It refuses an unknown existing `pm` schema and recognizes applied versions on repeated runs. Add future changes in new numbered migration files instead of modifying applied SQL. Schema changes and function deployment are separate remote operations; a failed function deployment may leave the schema successfully installed, and retrying recognizes that state.
 
-GitHub Actions splits deployment into **Apply Supabase database migrations**, **Deploy Supabase Edge Function**, and **Verify hosted Supabase endpoint**. The release check requires the actual application's unauthorized response and matching CORS headers before publishing the frontend. It establishes endpoint reachability and authentication/CORS behavior; an actual signed-in save/read test is still required to validate the live user/database path. `npm run verify:supabase` repeats that endpoint check.
+GitHub Actions splits deployment into **Apply Supabase database migrations**, **Deploy Supabase Edge Function**, and **Verify hosted Supabase endpoint**. The release check requires the private API's unauthorized response, a working public database-backed health response, and matching CORS headers before publishing the frontend. An actual signed-in write test is still required to validate the editor's write path. `npm run verify:supabase` repeats the endpoint checks.
 
 The function uses Supabase's injected `SUPABASE_DB_URL` and public keys. It verifies every access token against Supabase Auth before opening a database transaction. Gateway JWT verification is disabled to support publishable keys; the function's own user authentication is mandatory. Database queries run as `authenticated` under the verified user's identity, with row-level security. Database credentials and service-role keys never enter the browser.
 

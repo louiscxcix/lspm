@@ -8,11 +8,12 @@ const {applyMigrations}=require('./scripts/supabase-migrations');
 
 test('release gate requires the actual application auth response and matching CORS',async()=>{
   const origin='https://louiscxcix.github.io';let calls=0;
-  await verifyBackend({attempts:1,fetchImpl:async(_,options)=>{
+  await verifyBackend({attempts:1,fetchImpl:async(url,options)=>{
     calls++;
+    if(url.includes('/public/'))return Response.json({ok:true,readOnly:true});
     return options.method==='OPTIONS'?new Response(null,{status:204,headers:{'Access-Control-Allow-Origin':origin}}):Response.json({error:'Sign in to open your workspace.'},{status:401,headers:{'Access-Control-Allow-Origin':origin}});
   }});
-  assert.equal(calls,2);
+  assert.equal(calls,3);
   // A gateway auth error must not masquerade as a healthy, running application.
   await assert.rejects(verifyBackend({attempts:1,fetchImpl:async()=>Response.json({message:'Missing authorization header'},{status:401})}),/release check failed/);
   await assert.rejects(verifyBackend({attempts:1,fetchImpl:async()=>Response.json({error:'Sign in to open your workspace.'},{status:401})}),/frontend origin/);

@@ -1,4 +1,5 @@
 (function(root){
+  if(root.PUBLIC_READ_ONLY)return;
   const config=root.PM_SUPABASE_CONFIG;
   const local=['localhost','127.0.0.1'].includes(location.hostname);
   if(!config?.url||!config.publishableKey||(local&&!new URLSearchParams(location.search).has('cloud')))return;

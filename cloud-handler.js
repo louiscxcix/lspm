@@ -9,7 +9,7 @@ async function bodyBytes(request){
   return Buffer.concat(chunks);
 }
 
-function createCloudHandler({authenticate,withStore,allowedOrigins,geminiKey='',geminiFetch=globalThis.fetch}){
+function createCloudHandler({authenticate,withStore,withPublicStore,allowedOrigins,geminiKey='',geminiFetch=globalThis.fetch}){
   const origins=new Set(allowedOrigins);
   return async request=>{
     const origin=request.headers.get('origin');
@@ -18,13 +18,35 @@ function createCloudHandler({authenticate,withStore,allowedOrigins,geminiKey='',
     if(origin&&!origins.has(origin))return respond(403,{error:'Origin not allowed.'});
     if(origin){headers.set('Access-Control-Allow-Origin',origin);headers.set('Access-Control-Allow-Headers','authorization,apikey,content-type,x-client-info');headers.set('Access-Control-Allow-Methods','GET,POST,PUT,OPTIONS');}
     if(request.method==='OPTIONS')return new Response(null,{status:204,headers});
+    const url=new URL(request.url);
+    const pathname=url.pathname.replace(/^\/functions\/v1\/ontology/,'');
+    if(pathname.startsWith('/api/public/')){
+      if(request.method!=='GET')return respond(405,{error:'Public workspace is read-only.'});
+      if(!withPublicStore)return respond(503,{error:'Public workspace is not configured.'});
+      const route=pathname.slice('/api/public/'.length);
+      if(!['health','workspace','wip','staffing','production-staffing'].includes(route))return respond(404,{error:'Not found.'});
+      try{return await withPublicStore(async store=>{
+        if(route==='health'){await store.load();return respond(200,{ok:true,readOnly:true});}
+        if(route==='workspace'){
+          const workspace=await store.load();workspace.pendingChange=null;
+          for(const graph of [workspace.library,...workspace.projects]){
+            graph.changes=[];
+            for(const entity of graph.entities){delete entity.rawLog;delete entity.sourceExcerpt;}
+            for(const relation of graph.relations)delete relation.sourceExcerpt;
+          }
+          return respond(200,workspace);
+        }
+        const project=url.searchParams.get('project')||'';
+        if(route==='wip')return respond(200,await store.listWip(project,url.searchParams.get('snapshot')||''));
+        if(route==='staffing')return respond(200,await store.listStaffing(project));
+        return respond(200,await store.listProductionStaffing(project));
+      });}catch{return respond(503,{error:'Public workspace is unavailable. Check the deployment configuration.'});}
+    }
     const token=request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1];
     if(!token)return respond(401,{error:'Sign in to open your workspace.'});
     let user;
     try{user=await authenticate(token);}catch{return respond(401,{error:'Your session has expired. Sign in again.'});}
     if(!user?.id)return respond(401,{error:'Sign in to open your workspace.'});
-    const url=new URL(request.url);
-    const pathname=url.pathname.replace(/^\/functions\/v1\/ontology/,'');
     if(!pathname.startsWith('/api/'))return respond(404,{error:'Not found.'});
     let bytes;
     try{bytes=await bodyBytes(request);}catch{return respond(413,{error:'Request exceeds 16 MB.'});}

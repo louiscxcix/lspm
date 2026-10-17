@@ -61,3 +61,21 @@ async function withPostgresStore(client,userId,operation) {
 }
 
 module.exports={withPostgresStore,postgresSql};
+
+async function withPublicPostgresStore(client,operation){
+  await client.query('BEGIN READ ONLY');
+  try{
+    // This administrator-only selection occurs before switching to the restricted role.
+    const {rows}=await client.query('SELECT owner_id FROM pm.publication WHERE singleton=true');
+    const userId=rows[0]?.owner_id;
+    if(!userId)throw Error('No public workspace configured.');
+    await client.query('SET LOCAL ROLE authenticated');
+    await client.query("SELECT set_config('request.jwt.claim.sub',$1,true), set_config('search_path','pm,public',true)",[userId]);
+    const generators=createStore(postgresAdapter(client));
+    const store=Object.fromEntries(Object.entries(generators).map(([key,method])=>[key,(...args)=>run(method(...args))]));
+    const result=await operation(store);
+    await client.query('COMMIT');
+    return result;
+  }catch(error){await client.query('ROLLBACK');throw error;}
+}
+module.exports.withPublicPostgresStore=withPublicPostgresStore;

@@ -196,7 +196,7 @@ function options() {
     focus:selectedId ? $('#focusMode').value : '',keepPredecessors:$('#keepPredecessors').checked,showSubprocesses:$('#showSubprocesses').checked};
 }
 function render() {
-  $('#storageNote').textContent = window.PUBLIC_READ_ONLY?'Public cloud snapshot · read only':window.CLOUD_BACKEND?'Supabase · private workspace':'Local SQLite · this computer';
+  $('#storageNote').textContent = window.PUBLIC_READ_ONLY?(window.CLOUD_BACKEND?'Public workspace · read only':'Public cloud snapshot · read only'):window.CLOUD_BACKEND?'Supabase · private workspace':'Local SQLite · this computer';
   $('#projectHome').hidden=Boolean(store); $('#projectShell').hidden=!store;
   $('#projectForm').hidden=!workspace;
   $('#projectError').textContent=startupError;
@@ -228,7 +228,7 @@ function render() {
   $('#addFromLibrary').hidden=library;$('#renameProject').hidden=library;$('#archiveProject').hidden=library;$('#removeFromProject').hidden=library;
   $('#scopeLabel').textContent=library?'Global Library · unassigned objects':'Project: '+store.name+' · writes to shared DB';
   $('#archiveProject').textContent=archived?'Restore':'Archive';
-  ['renameProject','addFromLibrary','removeFromProject','recordsAdd','productionConnect','addEntityButton','addRelationButton','editEntity','previewCSV','extractSource'].forEach(id=>$('#'+id).disabled=archived);
+  ['renameProject','addFromLibrary','removeFromProject','recordsAdd','productionConnect','addEntityButton','addRelationButton','editEntity','previewCSV','extractSource'].forEach(id=>$('#'+id).disabled=archived||Boolean(window.PUBLIC_READ_ONLY));
   $('#extractSource').disabled=archived||!aiConfigured;
   $('#externalTransfer').textContent=aiConfigured?'Pressing Extract sends only this source to the configured Gemini API. Your full ontology stays on this computer. Review the draft before any ontology update.':'AI not configured. Set GEMINI_API_KEY on the local server; manual and CSV input remain available.';
   if(archived) invalidatePreview();

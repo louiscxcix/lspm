@@ -21,10 +21,11 @@ test('browser: Supabase login, authenticated project saves, reload, export and l
   const browser=await chromium.launch({executablePath:chrome,headless:true,args:['--no-sandbox']});
   t.after(async()=>{await browser.close();await new Promise(resolve=>server.close(resolve));store.close();fs.rmSync(dir,{recursive:true,force:true});});
   const context=await browser.newContext({acceptDownloads:true});
-  const cloud=createCloudHandler({allowedOrigins:[base],authenticate:async token=>{if(token!=='test-session')throw Error('Unauthorized');return {id:'d629ba18-2539-4274-b8dd-4dd04466a56c'};},withStore:async(_,fn)=>fn(store)});
-  let refreshes=0;
+  const cloud=createCloudHandler({allowedOrigins:[base],authenticate:async token=>{if(token!=='test-session')throw Error('Unauthorized');return {id:'d629ba18-2539-4274-b8dd-4dd04466a56c'};},withStore:async(_,fn)=>fn(store),withPublicStore:async fn=>fn(store)});
+  let refreshes=0,guestReads=0;
   await context.route('https://ahzpuefosoajwwgbfhng.supabase.co/**',async route=>{
     const req=route.request();
+    if(req.url().includes('/api/public/')){assert.equal(req.headers().authorization,undefined);guestReads++;}
     if(req.url().includes('/auth/v1/')){
       if(req.url().includes('refresh_token'))refreshes++;
       const body=req.url().includes('/logout')?{}:{access_token:'test-session',refresh_token:'refresh',expires_in:3600,user:{email:'owner@example.com'}};
@@ -34,7 +35,7 @@ test('browser: Supabase login, authenticated project saves, reload, export and l
     await route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:await response.text()});
   });
   const page=await context.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(base+'/?cloud=1');
+  await page.goto(base+'/?cloud=1&edit=1');
   await page.locator('#cloudSignIn input[name=email]').fill('owner@example.com');
   await page.locator('#cloudSignIn input[name=password]').fill('test-password');
   await page.locator('#cloudSignIn button[type=submit]').click();
@@ -53,5 +54,12 @@ test('browser: Supabase login, authenticated project saves, reload, export and l
   const download=await downloadPromise;const exported=JSON.parse(fs.readFileSync(await download.path(),'utf8'));assert.equal(exported.projects[0].name,'Supabase project');
   await page.locator('#cloudSignOut').click();await page.locator('#cloudSignIn').waitFor({state:'visible'});
   assert.equal(await page.evaluate(()=>sessionStorage.getItem('pm-session:ahzpuefosoajwwgbfhng.supabase.co')),null);
+  await page.goto(base+'/?cloud=1');
+  await page.waitForFunction(()=>workspace?.projects.some(p=>p.name==='Supabase project'));
+  assert.equal(await page.locator('#cloudSignIn').count(),0);
+  assert.equal(await page.locator('#projectForm').isVisible(),false);
+  assert.equal(await page.locator('#exportButton').isVisible(),false);
+  assert.ok(guestReads>=2);
+  assert.match(await page.locator('#storageNote').textContent(),/Public workspace/);
   assert.deepEqual(errors,[]);
 });

@@ -9,10 +9,13 @@ async function verifyBackend({baseUrl='https://ahzpuefosoajwwgbfhng.supabase.co'
       const body=await response.json().catch(()=>({}));
       if(response.status===401&&body.error==='Sign in to open your workspace.'){
         if(response.headers.get('Access-Control-Allow-Origin')!==origin)throw Error('The deployed function does not allow the frontend origin.');
+        const publicResponse=await fetchImpl(baseUrl+'/functions/v1/ontology/api/public/health',{headers:{Origin:origin},signal:AbortSignal.timeout(15000)});
+        const publicBody=await publicResponse.json().catch(()=>({}));
+        if(publicResponse.status!==200||publicBody.ok!==true||publicBody.readOnly!==true)throw Error('The public workspace is not ready.');
         const preflight=await fetchImpl(endpoint,{method:'OPTIONS',headers:{Origin:origin,'Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'authorization,apikey,content-type'},signal:AbortSignal.timeout(15000)});
         if(preflight.status!==204||preflight.headers.get('Access-Control-Allow-Origin')!==origin)throw Error('Frontend CORS preflight was rejected.');
-        console.log('Supabase function is reachable, rejects unauthenticated access, and allows the frontend origin.');
-        console.log('Authenticated database save/read verification still requires a user sign-in.');
+        console.log('Public workspace and database reads are ready; private endpoints require authentication.');
+        console.log('Authenticated database write verification still requires an editor sign-in.');
         return;
       }
       failure='Expected the application authentication response; received HTTP '+response.status+'.';
