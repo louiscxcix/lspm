@@ -44,7 +44,13 @@ function createRequestHandler({ store, geminiKey = '', geminiFetch = globalThis.
     if (!checkOrigin(req)) {json(res, 403, { error: 'Foreign origin blocked.' });return;}
     const url = new URL(req.url, 'http://127.0.0.1'),pathname = url.pathname;
     try {
-      if (req.method === 'GET' && pathname === '/api/health') {json(res, 200, { ok: true, aiConfigured: Boolean(geminiKey) });return;}
+      if (req.method === 'GET' && pathname === '/api/health') {json(res, 200, { ok: true, aiConfigured: Boolean(geminiKey), mapAssistantConfigured:Boolean(geminiKey) });return;}
+      if(req.method==='POST'&&pathname==='/api/map-assistant'){
+        const input=await readJson(req);if(input.consent!==true)throw Error('Approve sending this map context to Gemini.');
+        const workspace=await store.load(),scope=input.scopeId==='library'?workspace.library:workspace.projects.find(p=>p.id===input.scopeId);
+        if(!scope)throw Error('Unknown map scope.');
+        json(res,200,await require('./map-assistant-server').answer({scope,input,key:geminiKey,fetchImpl:geminiFetch}));return;
+      }
       if (req.method === 'GET' && pathname === '/api/workspace') {json(res, 200, await store.load());return;}
       const productionReads={'/api/progress':'listProgress','/api/hourly':'listHourly','/api/sample-preparation':'samplePreparationList'};
       if(req.method==='GET'&&productionReads[pathname]){json(res,200,await store[productionReads[pathname]](url.searchParams.get('project')||''));return;}

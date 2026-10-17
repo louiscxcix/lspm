@@ -78,6 +78,7 @@
     keepChange:id=>request('changes/'+encodeURIComponent(id)+'/keep','POST'),
     revertChange:(id,revision)=>request('changes/'+encodeURIComponent(id)+'/revert','POST',{revision}),
     settings:(projectId,viewKey,data)=>request('settings/'+encodeURIComponent(projectId)+'/'+encodeURIComponent(viewKey),'PUT',data),
+    mapAssistant:input=>request('map-assistant','POST',input),
     extract:async(scope,input)=>request('extract','POST',await source(scope,input)),
     wipList:(projectId,snapshot='')=>request('wip?'+new URLSearchParams({project:projectId,snapshot})),
     wipPreview:async(projectId,file,options={})=>request('wip/preview','POST',{...await source(projectId,file),projectId,...options}),

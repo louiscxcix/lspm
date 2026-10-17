@@ -58,3 +58,13 @@ test('authenticated owner mapping uses the server-resolved workspace, ignoring b
  const response=await handler(new Request('https://example.supabase.co/ontology/api/workspace?owner_id=untrusted',{headers:{Authorization:'Bearer valid'}}));
  assert.equal(response.status,200);assert.equal(opened,owner);
 });
+
+test('migrated map assistant authenticates, requires consent and keeps provider credentials server-side',async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pm-cloud-map-')),store=openStore(path.join(dir,'test.sqlite'));
+ t.after(()=>{store.close();fs.rmSync(dir,{recursive:true,force:true});});let sent=0;
+ const handler=createCloudHandler({allowedOrigins:[],authenticate:async()=>({id:'editor'}),withStore:async(_,fn)=>fn(store),geminiKey:'fixture-provider-secret',geminiFetch:async(_url,options)=>{sent++;assert.equal(options.headers['x-goog-api-key'],'fixture-provider-secret');return Response.json({candidates:[{content:{parts:[{text:JSON.stringify({answer:'No recorded map objects.',objectIds:['invented']})}]}}]});}});
+ const request=(input,authenticated=true)=>handler(new Request('https://example.supabase.co/ontology/api/map-assistant',{method:'POST',headers:{'Content-Type':'application/json',...(authenticated?{Authorization:'Bearer valid'}:{})},body:JSON.stringify(input)}));
+ assert.equal((await request({scopeId:'library',question:'Map?',consent:true},false)).status,401);
+ assert.equal((await request({scopeId:'library',question:'Map?'})).status,400);assert.equal(sent,0);
+ const before=store.load().revision,response=await request({scopeId:'library',question:'Map?',consent:true}),data=await response.json();assert.equal(response.status,200);assert.deepEqual(data.references,[]);assert.ok(!JSON.stringify(data).includes('fixture-provider-secret'));assert.equal(store.load().revision,before);
+});

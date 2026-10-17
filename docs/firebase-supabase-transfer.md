@@ -59,3 +59,13 @@ short-lived synthetic account, checks that the project is absent from public
 reads, then removes the test account and its records. It never changes the
 owner's data or credentials. All numbered migrations and the Firebase transfer,
 publisher and identity guards are part of normal CI checks.
+
+
+## Optional map AI
+
+Map questions now use the authenticated Supabase Edge Function rather than
+Firebase's browser SDK. Set `GEMINI_API_KEY` in Supabase Edge Function secrets to
+enable it. The key stays server-side; source messages and Evidence are excluded
+from map context. Without this separate credential the health response marks AI
+as unconfigured, while all ordinary data operations continue to work. The old
+Firebase browser API key is not an AI server credential and must not be reused.
