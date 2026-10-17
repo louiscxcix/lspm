@@ -78,21 +78,17 @@ test('domain and view expose the specified browser globals',()=>{
 const browserPath=process.env.CHROME_PATH||'/usr/bin/chromium';
 test('browser: owner creation/save, visible evidence, XSS, viewer lock, mobile layout and async scope guards',{timeout:30000,skip:!fs.existsSync(browserPath)},async t=>{
  domain();a.ok(fs.existsSync(path.join(__dirname,'sample-preparation-view.js')),'Sample Preparation view exists');
- const http=require('node:http'),os=require('node:os'),{spawn}=require('node:child_process'),pause=ms=>new Promise(r=>setTimeout(r,ms));
+ const http=require('node:http'),{chromium}=require('playwright-core'),pause=ms=>new Promise(r=>setTimeout(r,ms));
  const server=http.createServer((req,res)=>{
   if(req.url==='/'){res.setHeader('Content-Type','text/html; charset=utf-8');res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/sample-preparation.css"><main id="checks"></main><aside id="other"></aside><script src="/sample-preparation.js"></script><script src="/sample-preparation-view.js"></script>');return;}
   const file={'/sample-preparation.js':'sample-preparation.js','/sample-preparation-view.js':'sample-preparation-view.js','/sample-preparation.css':'sample-preparation.css'}[req.url];
   if(!file||!fs.existsSync(path.join(__dirname,file))){res.writeHead(404);res.end();return;}res.setHeader('Content-Type',(file.endsWith('.css')?'text/css':'text/javascript')+'; charset=utf-8');res.end(fs.readFileSync(path.join(__dirname,file)));
  });
  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>server.close(r)));
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sample-preparation-browser-'));
- const chrome=spawn(browserPath,['--no-sandbox','--headless=new','--disable-gpu','--no-first-run','--remote-debugging-port=0','--user-data-dir='+dir,'about:blank'],{stdio:'ignore'});let socket;
- t.after(async()=>{socket?.close();chrome.kill();if(chrome.exitCode===null)await new Promise(r=>chrome.once('exit',r));fs.rmSync(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
- let port;for(let i=0;i<100;i++){const file=path.join(dir,'DevToolsActivePort');if(fs.existsSync(file)){port=Number(fs.readFileSync(file,'utf8').split('\n')[0]);break;}await pause(50);}a.ok(port,'Chrome starts');
- const pages=await(await fetch('http://127.0.0.1:'+port+'/json/list')).json();socket=new WebSocket(pages.find(p=>p.type==='page').webSocketDebuggerUrl);await new Promise(r=>socket.addEventListener('open',r,{once:true}));
- let serial=0;const pending=new Map(),exceptions=[];
- socket.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails.text);const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(Error(m.error.message)):p.resolve(m.result);}});
- const send=(method,params={})=>new Promise((resolve,reject)=>{const id=++serial;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
+ const browser=await chromium.launch({executablePath:browserPath,headless:true,args:['--no-sandbox']});
+ t.after(()=>browser.close());const context=await browser.newContext(),page=await context.newPage(),cdp=await context.newCDPSession(page),exceptions=[];
+ cdp.on('Runtime.exceptionThrown',event=>exceptions.push(event.exceptionDetails.text));
+ const send=(method,params={})=>cdp.send(method,params);
  const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression:expression.includes('await ')?'(async()=>{'+expression+'})()':expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result.value;};
  await send('Runtime.enable');await send('Page.navigate',{url:'http://127.0.0.1:'+server.address().port});
  for(let i=0;i<100;i++){if(await evaluate('!!globalThis.SamplePreparationView'))break;await pause(30);}
