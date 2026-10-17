@@ -12,7 +12,7 @@
         import(`https://www.gstatic.com/firebasejs/${version}/firebase-ai.js`)
       ]);
       const app = initializeApp({
-        apiKey,, authDomain: 'ontho-166a6.firebaseapp.com',
+        apiKey, authDomain: 'ontho-166a6.firebaseapp.com',
         projectId: 'ontho-166a6', storageBucket: 'ontho-166a6.firebasestorage.app',
         messagingSenderId: '857703572607', appId: '1:857703572607:web:8c8f4b81fa9ebfe57d4b4a'
       });
