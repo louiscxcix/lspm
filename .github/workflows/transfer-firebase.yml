@@ -1,0 +1,46 @@
+name: Transfer retained Firebase data to Supabase
+on:
+  workflow_dispatch:
+    inputs:
+      publisher_hash:
+        description: SHA-256 of the local publisher capability; never enter the raw secret
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: firebase-data-transfer
+  cancel-in-progress: false
+jobs:
+  transfer:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: local-test-only
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.19.0
+      - run: npm ci
+      - name: Verify transfer guards against PostgreSQL
+        run: node --test firebase-transfer.test.js publish-supabase.test.js
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:local-test-only@localhost:5432/postgres
+      - name: Transfer and verify Firebase originals and missing application rows
+        run: node firebase-transfer.js import backups/firebase-latest.json.gz.enc
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          LSPM_DB_BACKUP_KEY: ${{ secrets.LSPM_DB_BACKUP_KEY }}
+      - name: Authorize the local read-only-Kakao data publisher
+        if: inputs.publisher_hash != ''
+        run: node firebase-transfer.js register-publisher "$PUBLISHER_HASH"
+        env:
+          PUBLISHER_HASH: ${{ inputs.publisher_hash }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

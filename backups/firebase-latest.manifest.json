@@ -1,0 +1,76 @@
+{
+  "format": "pm-firebase-export-v1",
+  "readTime": "2026-10-17T02:38:57.000Z",
+  "firebaseProject": "ontho-166a6",
+  "sha256": "c9733e61535b6eb99827df4adc4d6e19e8603466f594c278ef430ba15c0f6c64",
+  "bytes": 18989816,
+  "combinedDatabaseSha256": "8a3db7a8d875a0d752bd3d5361904d7d06d99199093fdc178ca58fba2164570d",
+  "localRevision": 338,
+  "combinedRevision": 339,
+  "seedVersion": "seed-9bdb8abf-d875-4e98-9599-78ca2b885ca4",
+  "retainedDocuments": 2449,
+  "seedHistoryRecords": 383,
+  "seedVersions": 17,
+  "cloudUploads": 5,
+  "legacyAttachments": 1,
+  "candidateRows": 467,
+  "candidatesByTable": {
+    "projects": 1,
+    "project_view_settings": 1,
+    "entities": 3,
+    "relations": 219,
+    "sources": 4,
+    "wip_snapshots": 3,
+    "wip_counts": 234,
+    "sample_preparation_records": 2
+  },
+  "preservedLocalConflicts": 0,
+  "combinedCounts": {
+    "projects": 7,
+    "entities": 1715,
+    "relations": 4141,
+    "project_memberships": 946,
+    "project_assessments": 0,
+    "project_schedules": 60,
+    "project_workstreams": 1264,
+    "project_view_settings": 16,
+    "sources": 853,
+    "ingestion_jobs": 407,
+    "wip_snapshots": 3,
+    "wip_counts": 234,
+    "hourly_records": 0,
+    "sample_preparation_records": 2
+  },
+  "storage": [
+    {
+      "bucket": "ontho-166a6.firebasestorage.app",
+      "status": "bucket_not_found",
+      "objects": 0
+    },
+    {
+      "bucket": "ontho-166a6.appspot.com",
+      "status": "bucket_not_found",
+      "objects": 0
+    }
+  ],
+  "excluded": [
+    "Firebase Authentication credentials",
+    "Files outside Firebase"
+  ],
+  "encryption": {
+    "cipher": "aes-256-cbc",
+    "kdf": "PBKDF2",
+    "iterations": 200000,
+    "keyCommitted": false
+  },
+  "encryptedArtifacts": {
+    "firebase-latest.json.gz.enc": {
+      "bytes": 18989840,
+      "sha256": "4aa6850247f743efc8436bffa9592acccfac77822853abe1fe7313de6c3b9faa"
+    },
+    "ontology-with-firebase.sqlite.enc": {
+      "bytes": 15462432,
+      "sha256": "f653965b27cacb3847f79612f2c2a38caaf0ac79e0afed0e17c49aeb56634e0b"
+    }
+  }
+}
