@@ -1,0 +1,221 @@
+{
+  "revision": 338,
+  "schemaVersion": 5,
+  "integrity": "ok",
+  "encryptedChecksumVerified": true,
+  "plaintextChecksumVerified": true,
+  "tables": {
+    "change_sets": {
+      "count": 328,
+      "columns": [
+        "id",
+        "scope",
+        "recorded_at",
+        "revision",
+        "items_json",
+        "rows_json",
+        "acknowledged_at",
+        "reverted_at",
+        "revert_of"
+      ]
+    },
+    "entities": {
+      "count": 1712,
+      "columns": [
+        "id",
+        "type",
+        "data_json"
+      ]
+    },
+    "entity_changes": {
+      "count": 122,
+      "columns": [
+        "id",
+        "entity_id",
+        "project_id",
+        "data_json"
+      ]
+    },
+    "event_change_proposals": {
+      "count": 0,
+      "columns": [
+        "id",
+        "event_id",
+        "scope",
+        "status",
+        "effective_at",
+        "created_at",
+        "updated_at",
+        "data_json"
+      ]
+    },
+    "hourly_records": {
+      "count": 0,
+      "columns": [
+        "id",
+        "project_id",
+        "data_json",
+        "recorded_at",
+        "revision"
+      ]
+    },
+    "ingestion_jobs": {
+      "count": 407,
+      "columns": [
+        "id",
+        "source_id",
+        "status",
+        "draft_json",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "meta": {
+      "count": 10,
+      "columns": [
+        "key",
+        "value"
+      ]
+    },
+    "production_staffing_counts": {
+      "count": 0,
+      "columns": [
+        "id",
+        "project_id",
+        "target_id",
+        "target_type",
+        "captured_at",
+        "shift",
+        "basis",
+        "count",
+        "note",
+        "created_at"
+      ]
+    },
+    "project_assessments": {
+      "count": 0,
+      "columns": [
+        "project_id",
+        "entity_id",
+        "data_json"
+      ]
+    },
+    "project_memberships": {
+      "count": 946,
+      "columns": [
+        "project_id",
+        "entity_id"
+      ]
+    },
+    "project_schedules": {
+      "count": 60,
+      "columns": [
+        "project_id",
+        "entity_id",
+        "data_json"
+      ]
+    },
+    "project_view_settings": {
+      "count": 15,
+      "columns": [
+        "project_id",
+        "view_key",
+        "data_json"
+      ]
+    },
+    "project_workstreams": {
+      "count": 1264,
+      "columns": [
+        "project_id",
+        "entity_id",
+        "code"
+      ]
+    },
+    "projects": {
+      "count": 6,
+      "columns": [
+        "id",
+        "name",
+        "status",
+        "created_at",
+        "updated_at",
+        "project_type"
+      ]
+    },
+    "relations": {
+      "count": 3922,
+      "columns": [
+        "id",
+        "type",
+        "from_id",
+        "to_id",
+        "scope_project_id",
+        "data_json"
+      ]
+    },
+    "sample_preparation_records": {
+      "count": 0,
+      "columns": [
+        "id",
+        "project_id",
+        "sheet_id",
+        "version",
+        "data_json",
+        "recorded_at",
+        "revision"
+      ]
+    },
+    "sources": {
+      "count": 849,
+      "columns": [
+        "id",
+        "kind",
+        "filename",
+        "mime_type",
+        "content",
+        "created_at",
+        "metadata_json"
+      ]
+    },
+    "staffing_counts": {
+      "count": 0,
+      "columns": [
+        "id",
+        "project_id",
+        "part_id",
+        "captured_at",
+        "shift",
+        "basis",
+        "count",
+        "note",
+        "created_at"
+      ]
+    },
+    "wip_counts": {
+      "count": 0,
+      "columns": [
+        "id",
+        "snapshot_id",
+        "source_row",
+        "source_column",
+        "product_code",
+        "part_label",
+        "part_id",
+        "stage_label",
+        "step_id",
+        "quantity"
+      ]
+    },
+    "wip_snapshots": {
+      "count": 0,
+      "columns": [
+        "id",
+        "project_id",
+        "captured_at",
+        "filename",
+        "sheet",
+        "created_at"
+      ]
+    }
+  }
+}
