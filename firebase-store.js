@@ -1,6 +1,9 @@
 (function (root) {
   root.FirebaseStore = {
     ready: (async () => {
+      // Legacy Firebase adapter is not part of the Supabase app. Keep its API key out of source control.
+      const apiKey = root.PM_FIREBASE_API_KEY;
+      if (!apiKey) throw new Error('Legacy Firebase adapter is disabled during the Supabase migration.');
       const version = '11.10.0';
       const [{initializeApp}, Auth, Firestore, AI] = await Promise.all([
         import(`https://www.gstatic.com/firebasejs/${version}/firebase-app.js`),
@@ -9,7 +12,7 @@
         import(`https://www.gstatic.com/firebasejs/${version}/firebase-ai.js`)
       ]);
       const app = initializeApp({
-        apiKey: 'REMOVED_GOOGLE_API_KEY', authDomain: 'ontho-166a6.firebaseapp.com',
+        apiKey,, authDomain: 'ontho-166a6.firebaseapp.com',
         projectId: 'ontho-166a6', storageBucket: 'ontho-166a6.firebasestorage.app',
         messagingSenderId: '857703572607', appId: '1:857703572607:web:8c8f4b81fa9ebfe57d4b4a'
       });
