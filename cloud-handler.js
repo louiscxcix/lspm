@@ -26,7 +26,7 @@ function createCloudHandler({authenticate,withStore,withPublicStore,allowedOrigi
       const route=pathname.slice('/api/public/'.length);
       if(!['health','workspace','wip','staffing','production-staffing'].includes(route))return respond(404,{error:'Not found.'});
       try{return await withPublicStore(async store=>{
-        if(route==='health'){await store.load();return respond(200,{ok:true,readOnly:true});}
+        if(route==='health'){if(store.health)await store.health();else await store.load();return respond(200,{ok:true,readOnly:true});}
         if(route==='workspace'){
           const workspace=await store.load();workspace.pendingChange=null;
           for(const graph of [workspace.library,...workspace.projects]){
@@ -40,7 +40,11 @@ function createCloudHandler({authenticate,withStore,withPublicStore,allowedOrigi
         if(route==='wip')return respond(200,await store.listWip(project,url.searchParams.get('snapshot')||''));
         if(route==='staffing')return respond(200,await store.listStaffing(project));
         return respond(200,await store.listProductionStaffing(project));
-      });}catch{return respond(503,{error:'Public workspace is unavailable. Check the deployment configuration.'});}
+      });}catch(error){
+        const candidate=String(error.code||'PUBLIC_READ_FAILED');
+        const code=/^[A-Z0-9_]{1,64}$/.test(candidate)?candidate:'PUBLIC_READ_FAILED';
+        return respond(503,{error:'Public workspace is unavailable.',code,stage:error.publicStage==='supabase-data-api'?'supabase-data-api':'public-read'});
+      }
     }
     const token=request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1];
     if(!token)return respond(401,{error:'Sign in to open your workspace.'});

@@ -4,7 +4,7 @@ Target project: `ahzpuefosoajwwgbfhng`. The frontend uses its public publishable
 
 ## Public viewing
 
-`https://louiscxcix.github.io/lspm/` displays the published workspace without a sign-in panel. Public API endpoints allow only reads of the published graph and its WIP/staffing observations. Source-file bytes, raw logs, source excerpts, exports, audit diffs and all write operations are excluded. Public database requests use a read-only transaction under the pinned owner's restricted database role. Query parameters cannot select other users' records.
+`https://louiscxcix.github.io/lspm/` displays the published workspace without a sign-in panel. Public API endpoints allow only reads of the published graph and its WIP/staffing observations. Source-file bytes, raw logs, source excerpts, exports, audit diffs and all write operations are excluded. Public reads use the Supabase HTTPS Data API and the fixed, SELECT-only `public.pm_public_read` function, so guest views do not open direct PostgreSQL connections from Edge. The function has no owner-ID parameter and explicitly filters every table to the administrator-pinned publication; other users' records remain private. Anonymous users receive permission to call this function, not permission to read the underlying tables.
 
 Migration `202610170001_public_workspace.sql` pins the single populated account if one exists. With no populated account it uses the sole existing Auth user, or creates an empty, dedicated publication scope if there is no unambiguous user. If multiple populated accounts already exist, deployment stops rather than exposing all accounts. The original SQLite records are still not imported automatically.
 

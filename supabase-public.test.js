@@ -6,6 +6,7 @@ const path=require('node:path');
 const {applyMigrations}=require('./scripts/supabase-migrations');
 const {withPostgresStore,withPublicPostgresStore}=require('./postgres-store');
 const {createCloudHandler}=require('./cloud-handler');
+const {createPublicDataStore}=require('./public-data-api');
 const Projects=require('./projects'),Model=require('./ontology-model');
 
 test('public workspace is pinned, readable without login, and cannot be changed by guests', {skip:!process.env.TEST_DATABASE_URL},async()=>{
@@ -26,16 +27,48 @@ test('public workspace is pinned, readable without login, and cannot be changed 
     evidence.sourceExcerpt='private excerpt';
     const part=Model.addEntity(ws.library,{type:'Part',name:'Visible part'});
     const link=Model.addRelation(ws.library,{type:'supported_by',from:part.id,to:evidence.id});link.sourceExcerpt='private link excerpt';
-    await withPostgresStore(client,owner,s=>s.save(ws,'library',ws.revision));
+    const step=Model.addEntity(ws.library,{type:'Production Step',name:'Router'});
+    Model.addRelation(ws.library,{type:'applies_to',from:step.id,to:part.id});
+    ws=await withPostgresStore(client,owner,s=>s.save(ws,'library',ws.revision));
+    const projectId=ws.projects[0].id;
+    ws.projects[0].entities=ws.library.entities.map(e=>({...e,projectId}));
+    ws.projects[0].relations=ws.library.relations.map(r=>({...r,projectId}));
+    ws.projects[0].entities.find(e=>e.id===step.id).plannedStart='2026-10-17';
+    ws.projects[0].workstreams={[part.id]:['production']};
+    ws=await withPostgresStore(client,owner,s=>s.save(ws,projectId,ws.revision));
+    ws=await withPostgresStore(client,owner,s=>s.saveWip({projectId,revision:ws.revision,capturedAt:'2026-10-17T08:00:00Z',filename:'mes.xlsx',sheet:'WIP',rows:[{row:1,column:2,partName:part.name,partId:part.id,stepId:step.id,stage:'Router',quantity:0}]}));
+    ws=await withPostgresStore(client,owner,s=>s.saveStaffing({projectId,revision:ws.revision,partId:part.id,count:3,capturedAt:'2026-10-17T08:00:00Z'}));
+    ws=await withPostgresStore(client,owner,s=>s.saveProductionStaffing({projectId,revision:ws.revision,targetId:step.id,targetType:'Production Step',count:2,capturedAt:'2026-10-17T08:00:00Z'}));
+    await withPostgresStore(client,owner,s=>s.putSettings(projectId,'production',{zoom:1.5}));
     let hidden=await withPostgresStore(client,other,s=>s.load());hidden.projects.push(Projects.create('Other private account'));
     await withPostgresStore(client,other,s=>s.save(hidden,null,hidden.revision));
-    const handler=createCloudHandler({allowedOrigins:['https://louiscxcix.github.io'],authenticate:async()=>{throw Error('No login');},withStore:()=>{throw Error('No login');},withPublicStore:fn=>withPublicPostgresStore(client,fn)});
+    const anonRead=async(operation,project='',snapshot='')=>{
+      await client.query('BEGIN');
+      try{await client.query('SET LOCAL ROLE anon');const result=await client.query('SELECT public.pm_public_read($1,$2,$3) AS value',[operation,project,snapshot]);await client.query('COMMIT');return result.rows[0].value;}
+      catch(error){await client.query('ROLLBACK');throw error;}
+    };
+    const dataStore=createPublicDataStore({url:'https://example.supabase.co',apiKey:'public-key',fetchImpl:async(url,options)=>{
+      assert.equal(url,'https://example.supabase.co/rest/v1/rpc/pm_public_read');assert.equal(options.headers.apikey,'public-key');
+      const body=JSON.parse(options.body);
+      try{return Response.json(await anonRead(body.operation,body.project_id,body.snapshot_id));}
+      catch(error){return Response.json({code:error.code},{status:400});}
+    }});
+    const handler=createCloudHandler({allowedOrigins:['https://louiscxcix.github.io'],authenticate:async()=>{throw Error('No login');},withStore:()=>{throw Error('No login');},withPublicStore:fn=>fn(dataStore)});
     const request=(route,method='GET')=>handler(new Request('https://example.supabase.co/functions/v1/ontology/api/'+route,{method}));
     let response=await request('public/workspace?owner_id='+other);assert.equal(response.status,200);
     const data=await response.json();assert.equal(data.projects.length,1);assert.equal(data.projects[0].name,'Visible project');
     assert.equal(data.pendingChange,null);assert.deepEqual(data.library.changes,[]);
     assert.equal(data.library.entities[0].rawLog,undefined);assert.equal(data.library.entities[0].sourceExcerpt,undefined);
     assert.equal(data.library.relations[0].sourceExcerpt,undefined);
+    const expected=await withPublicPostgresStore(client,s=>s.load());expected.pendingChange=null;
+    for(const graph of [expected.library,...expected.projects]){graph.changes=[];for(const e of graph.entities){delete e.rawLog;delete e.sourceExcerpt;}for(const r of graph.relations)delete r.sourceExcerpt;}
+    assert.deepEqual(data,expected);
+    assert.deepEqual(await dataStore.listWip(projectId),await withPostgresStore(client,owner,s=>s.listWip(projectId)));
+    assert.deepEqual(await dataStore.listStaffing(projectId),await withPostgresStore(client,owner,s=>s.listStaffing(projectId)));
+    assert.deepEqual(await dataStore.listProductionStaffing(projectId),await withPostgresStore(client,owner,s=>s.listProductionStaffing(projectId)));
+    assert.equal((await anonRead('workspace',projectId,other)).projects[0].name,'Visible project');
+    await assert.rejects(anonRead('export'),/Unsupported public operation/);
+    await assert.rejects(anonRead('wip',hidden.projects[0].id),/Unknown project/);
     assert.equal((await request('public/workspace','POST')).status,405);
     assert.equal((await request('workspace','POST')).status,401);
     assert.equal((await request('public/export')).status,404);

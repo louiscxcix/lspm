@@ -1,5 +1,5 @@
 import postgres from 'npm:postgres@3.4.7';
-import {createCloudHandler,withPostgresStore,withPublicPostgresStore} from './app.mjs';
+import {createCloudHandler,withPostgresStore,createPublicDataStore} from './app.mjs';
 
 const url=Deno.env.get('SUPABASE_URL')!;
 const apiKey=Object.values(JSON.parse(Deno.env.get('SUPABASE_PUBLISHABLE_KEYS')||'{}'))[0] as string || Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -8,12 +8,7 @@ const allowedOrigins=(Deno.env.get('PM_ALLOWED_ORIGINS')||'https://louiscxcix.gi
 
 Deno.serve(createCloudHandler({
   allowedOrigins,
-  withPublicStore:async (operation:Function)=>{
-    const connection=await database.reserve();
-    const client={query:async (text:string,params:unknown[]=[])=>({rows:Array.from(await connection.unsafe(text,params as never[]))})};
-    try{return await withPublicPostgresStore(client,operation);}
-    finally{connection.release();}
-  },
+  withPublicStore:(operation:Function)=>operation(createPublicDataStore({url,apiKey})),
   geminiKey:Deno.env.get('GEMINI_API_KEY')||'',
   authenticate:async (token:string)=>{
     const response=await fetch(url+'/auth/v1/user',{headers:{apikey:apiKey,Authorization:'Bearer '+token}});
