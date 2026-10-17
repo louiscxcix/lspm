@@ -65,7 +65,7 @@ jobs:
             git fetch origin recovery/backup-inspection
             git switch -c backup-inspection FETCH_HEAD
           else
-            git switch --orphan backup-inspection
+            git checkout --orphan backup-inspection
             git rm -rf .
           fi
           cp ../inspection-report/backup-metadata.json backup-metadata.json
