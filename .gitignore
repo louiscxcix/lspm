@@ -6,6 +6,7 @@ public-build/
 !.env.example
 .local-data/
 *.sqlite
+!/backups/ontology-latest.sqlite
 *.sqlite-*
 *.db
 *.bak
