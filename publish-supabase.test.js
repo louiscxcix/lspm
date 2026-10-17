@@ -12,11 +12,31 @@ function fixture(){
 }
 test('publisher retains author text but excludes credentials and deduplicates confirmed rows',()=>{
  const f=fixture();const rows=changesFrom(f.db);assert.equal(rows.length,2);const s=rows.find(r=>r.table==='sources');const text=Buffer.from(s.row.content,'base64').toString();assert.ok(text.includes('LG Innotek request'));assert.ok(!text.includes('must-not-upload'));
+ assert.equal(JSON.parse(s.row.metadata_json).supabasePublication.publishedContentSha256,require('node:crypto').createHash('sha256').update(text).digest('hex'));
  const cache=Object.fromEntries(rows.map(r=>[r.key,{hash:r.fingerprint,row:r.row}]));assert.deepEqual(changesFrom(f.db,cache),[]);f.db.close();
 });
 test('failed publication does not advance local checkpoint',async()=>{
  const f=fixture();f.db.close();const configFile=path.join(f.dir,'config.json'),stateFile=path.join(f.dir,'state.json');fs.writeFileSync(configFile,JSON.stringify({token:'private-token',publishableKey:'public'}));
- await assert.rejects(publish({configFile,stateFile,dbFile:f.file,fetchImpl:async()=>({ok:false,status:503})}),/SUPABASE_PUBLISH_FAILED_503/);assert.equal(fs.existsSync(stateFile),false);
+ await assert.rejects(publish({configFile,stateFile,dbFile:f.file,fetchImpl:async()=>({ok:false,status:503})}),/SUPABASE_PUBLISH_FAILED_503/);const state=JSON.parse(fs.readFileSync(stateFile));assert.deepEqual(state.records,{});assert.equal(state.lastConfirmedAt,undefined);assert.equal(state.pendingBatch.requestKey.length,64);
+});
+test('binary source bytes and text byte-order marks survive publication',()=>{
+ const f=fixture(),binary=Buffer.from('89504e47ff','hex'),bom=Buffer.from('\uFEFFRetain original text');
+ f.db.prepare('INSERT INTO sources VALUES(?,?,?,?,?,?,?)').run('png','attachment','photo.png','image/png',binary,'2026-10-17','{}');
+ f.db.prepare('INSERT INTO sources VALUES(?,?,?,?,?,?,?)').run('bom','history','text.txt','text/plain',bom,'2026-10-17','{}');
+ const rows=changesFrom(f.db);assert.deepEqual(Buffer.from(rows.find(r=>r.id==='png').row.content,'base64'),binary);assert.deepEqual(Buffer.from(rows.find(r=>r.id==='bom').row.content,'base64'),bom);f.db.close();
+});
+test('new operations get new request keys even when an earlier value repeats',async()=>{
+ const f=fixture();f.db.close();const configFile=path.join(f.dir,'config.json'),stateFile=path.join(f.dir,'state.json');fs.writeFileSync(configFile,JSON.stringify({token:'private-token',publishableKey:'public'}));
+ const replies=new Map(),keys=[],remote={name:''};let revision=0;
+ const fetchImpl=async(url,request)=>{if(url.endsWith('pm_history_sync_status'))return {ok:true,json:async()=>({revision})};const b=JSON.parse(request.body).p_batch;keys.push(b.key);if(!replies.has(b.key)){for(const c of b.changes)if(c.table==='entities')remote.name=JSON.parse(c.row.data_json).name;replies.set(b.key,{revision:++revision,changed:1,accepted:b.changes.map(c=>({table:c.table,id:c.id})),conflicts:[]});}return{ok:true,json:async()=>replies.get(b.key)};};
+ for(const name of ['A','B','A','B']){const d=new DatabaseSync(f.file);d.prepare('UPDATE entities SET data_json=?').run(JSON.stringify({id:'person',type:'Person',name,status:'active'}));d.close();await publish({configFile,stateFile,dbFile:f.file,fetchImpl});}
+ assert.equal(remote.name,'B');assert.equal(new Set(keys).size,4);
+});
+test('an uncertain request reuses its persisted operation key on retry',async()=>{
+ const f=fixture();f.db.close();const configFile=path.join(f.dir,'config.json'),stateFile=path.join(f.dir,'state.json');fs.writeFileSync(configFile,JSON.stringify({token:'private-token',publishableKey:'public'}));
+ const keys=[],replies=new Map();let loseReply=true;
+ const fetchImpl=async(url,request)=>{if(url.endsWith('pm_history_sync_status'))return{ok:true,json:async()=>({revision:1})};const b=JSON.parse(request.body).p_batch;keys.push(b.key);if(!replies.has(b.key))replies.set(b.key,{revision:1,changed:1,accepted:b.changes.map(c=>({table:c.table,id:c.id})),conflicts:[]});if(loseReply){loseReply=false;throw Error('Connection lost after commit');}return{ok:true,json:async()=>replies.get(b.key)};};
+ await assert.rejects(publish({configFile,stateFile,dbFile:f.file,fetchImpl}),/Connection lost/);await publish({configFile,stateFile,dbFile:f.file,fetchImpl});assert.equal(keys[0],keys[1]);assert.equal(replies.size,1);assert.equal(JSON.parse(fs.readFileSync(stateFile)).pendingBatch,undefined);
 });
 test('invalid ontology never reaches the remote publisher',async()=>{
  const f=fixture();f.db.prepare('UPDATE entities SET data_json=?').run(JSON.stringify({id:'person',type:'Person',name:'Broken person'}));f.db.close();

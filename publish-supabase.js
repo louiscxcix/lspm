@@ -1,8 +1,8 @@
 'use strict';
-const fs=require('node:fs'),path=require('node:path'),{createHash}=require('node:crypto');
+const fs=require('node:fs'),path=require('node:path'),{createHash,randomUUID}=require('node:crypto');
 const {DatabaseSync}=require('node:sqlite');
 const {redact}=require('./firebase-transfer');
-const hash=v=>createHash('sha256').update(typeof v==='string'?v:JSON.stringify(v)).digest('hex');
+const hash=v=>createHash('sha256').update(typeof v==='string'||v instanceof Uint8Array?v:JSON.stringify(v)).digest('hex');
 const configPath=path.resolve(__dirname,'../.local-data/supabase-publisher.json');
 const cachePath=path.resolve(__dirname,'../.local-data/supabase-publish-state.json');
 function changesFrom(db,cache={}){
@@ -10,9 +10,13 @@ function changesFrom(db,cache={}){
   for(const table of ['sources','entities','relations','project_memberships'])for(const raw of db.prepare('SELECT * FROM '+table).all()){
     const row={...raw};
     if(table==='sources'){
-      if(row.mime_type==='application/pdf')continue; // Original attachment transfer has its own verified migration.
-      const text=Buffer.from(row.content).toString('utf8');row.content=Buffer.from(typeof redact(text)==='string'?redact(text):text).toString('base64');
-      row.metadata_json=redact(row.metadata_json);
+      const original=Buffer.from(row.content),originalMetadata=row.metadata_json;let bytes=original;
+      if(/^text\//.test(row.mime_type)||row.mime_type==='application/json'){
+        try{const text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(original);bytes=Buffer.from(redact(text));}catch{}
+      }
+      const cleanMetadata=redact(originalMetadata);
+      if(!bytes.equals(original)||cleanMetadata!==originalMetadata){const metadata=JSON.parse(cleanMetadata);metadata.supabasePublication={redacted:true,originalContentSha256:hash(original),publishedContentSha256:hash(bytes),originalMetadataSha256:hash(originalMetadata)};row.metadata_json=JSON.stringify(metadata);}
+      row.content=bytes.toString('base64');
     }
     const id=table==='project_memberships'?JSON.stringify([row.project_id,row.entity_id]):row.id,key=table+':'+id,fingerprint=hash(row);
     if(cache[key]?.hash===fingerprint)continue;
@@ -29,21 +33,29 @@ async function publish({fetchImpl=fetch,configFile=configPath,stateFile=cachePat
   }
   if(statusOnly)return rpc('pm_history_sync_status',{});
   const cache=fs.existsSync(stateFile)?JSON.parse(fs.readFileSync(stateFile)):{};
-  const db=new DatabaseSync(dbFile,{readOnly:true});let rows;
+  const db=new DatabaseSync(dbFile,{readOnly:true});let snapshot;
   try{
+    db.exec('BEGIN');
     const entities=db.prepare('SELECT data_json FROM entities').all().map(r=>JSON.parse(r.data_json));
     const relations=db.prepare('SELECT data_json,scope_project_id FROM relations').all().map(r=>({...JSON.parse(r.data_json),scopeProjectId:r.scope_project_id}));
     require('./ontology-model').validateStore({version:1,entities,relations});
     if(entities.some(e=>e.type==='Event'&&e.eventRecord&&e.privacy!=='local_only'))throw Error('PRIVATE_HISTORY_REQUIRED');
-    rows=changesFrom(db,cache.records||{});
+    snapshot=changesFrom(db,{});db.exec('COMMIT');
   }finally{db.close();}
-  if(!rows.length){const remote=await rpc('pm_history_sync_status',{});return {unchanged:true,revision:remote.revision,pendingConflicts:cache.pendingConflicts||0};}
   cache.records||={};let changed=0,conflicts=0,revision;let batch=[];
+  function saveState(){const temp=stateFile+'.pending';fs.writeFileSync(temp,JSON.stringify(cache),{mode:0o600});fs.renameSync(temp,stateFile);}
+  async function sendPending(){
+    const pending=cache.pendingBatch,result=await rpc('pm_ingest_local_history',{p_batch:{key:pending.requestKey,changes:pending.changes}}),accepted=new Set(result.accepted.map(x=>x.table+':'+x.id)),rejected=new Set(result.conflicts.map(x=>x.table+':'+x.id));
+    if(pending.items.some(x=>!accepted.has(x.key)&&!rejected.has(x.key)))throw Error('PUBLISH_ACK_INCOMPLETE');
+    for(const item of pending.items)if(accepted.has(item.key))cache.records[item.key]={hash:item.fingerprint,...(item.table==='entities'?{row:item.row}:{})};
+    changed+=result.changed;conflicts+=result.conflicts.length;revision=result.revision;cache.lastConfirmedAt=new Date().toISOString();cache.remoteRevision=revision;cache.pendingConflicts=conflicts;delete cache.pendingBatch;saveState();
+  }
+  const recoveredPending=Boolean(cache.pendingBatch);if(recoveredPending)await sendPending();
+  const rows=snapshot.filter(r=>cache.records[r.key]?.hash!==r.fingerprint).map(r=>({...r,...(r.table==='entities'&&cache.records[r.key]?.row?{before:cache.records[r.key].row}:{})}));
+  if(!rows.length){const remote=await rpc('pm_history_sync_status',{});return {unchanged:changed===0,changed,conflicts,revision:remote.revision,recoveredPending,pendingConflicts:cache.pendingConflicts||0};}
   async function flush(){
-    if(!batch.length)return;const changes=batch.map(({table,id,row,before})=>({table,id,row,...(before?{before}:{})})),result=await rpc('pm_ingest_local_history',{p_batch:{key:hash(changes),changes}}),accepted=new Set(result.accepted.map(x=>x.table+':'+x.id));
-    for(const item of batch)if(accepted.has(item.key))cache.records[item.key]={hash:item.fingerprint,...(item.table==='entities'?{row:item.row}:{})};
-    changed+=result.changed;conflicts+=result.conflicts.length;revision=result.revision;cache.lastConfirmedAt=new Date().toISOString();cache.remoteRevision=revision;cache.pendingConflicts=conflicts;
-    const temp=stateFile+'.pending';fs.writeFileSync(temp,JSON.stringify(cache),{mode:0o600});fs.renameSync(temp,stateFile);batch=[];
+    if(!batch.length)return;const changes=batch.map(({table,id,row,before})=>({table,id,row,...(before?{before}:{})}));
+    cache.pendingBatch={requestKey:hash({operation:randomUUID(),changes}),changes,items:batch};saveState();await sendPending();batch=[];
   }
   for(const row of rows){if(Buffer.byteLength(JSON.stringify(row.row))>380000)throw Error('PUBLISH_RECORD_REQUIRES_ATTACHMENT_TRANSFER');if(batch.length>=200||Buffer.byteLength(JSON.stringify(batch))+Buffer.byteLength(JSON.stringify(row))>390000)await flush();batch.push(row);}await flush();
   return {changed,conflicts,revision,recordsConsidered:rows.length};

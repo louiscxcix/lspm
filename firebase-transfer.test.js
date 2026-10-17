@@ -56,6 +56,7 @@ test('PostgreSQL merge preserves edits, is idempotent, and rejects stale revisio
     await db.query('BEGIN;SET LOCAL ROLE anon');await assert.rejects(db.query('SELECT * FROM pm.firebase_documents'),/permission denied/);await db.query('ROLLBACK');
     await db.query('CREATE TABLE pm.entities(owner_id UUID,id TEXT,type TEXT,data_json TEXT,PRIMARY KEY(owner_id,id));CREATE TABLE pm.sources(owner_id UUID,id TEXT,kind TEXT,filename TEXT,mime_type TEXT,content BYTEA,created_at TEXT,metadata_json TEXT,PRIMARY KEY(owner_id,id));CREATE TABLE pm.relations(owner_id UUID,id TEXT,type TEXT,from_id TEXT,to_id TEXT,scope_project_id TEXT,data_json TEXT,PRIMARY KEY(owner_id,id));CREATE TABLE pm.project_memberships(owner_id UUID,project_id TEXT,entity_id TEXT,PRIMARY KEY(owner_id,project_id,entity_id))');
     await db.query(fs.readFileSync(require('node:path').join(__dirname,'supabase/migrations/202610170006_history_publisher.sql'),'utf8'));
+    await db.query(fs.readFileSync(require('node:path').join(__dirname,'supabase/migrations/202610170007_publisher_integrity.sql'),'utf8'));
     const token='fixture-only-'.padEnd(64,'x'),tokenHash=require('node:crypto').createHash('sha256').update(token).digest('hex');
     await db.query("INSERT INTO pm.publisher_devices(token_hash,owner_id,name) VALUES($1,$2,'test')",[tokenHash,owner]);
     await assert.rejects(db.query('SELECT public.pm_history_sync_status($1)',['wrong']),/PUBLISHER_AUTH_REQUIRED/);
@@ -66,6 +67,22 @@ test('PostgreSQL merge preserves edits, is idempotent, and rejects stale revisio
     const conflict={key:'d'.repeat(64),changes:[{table:'entities',id:'contact',row:{...row,data_json:JSON.stringify({id:'contact',type:'Person',name:'Unconfirmed overwrite'})}}]};
     assert.equal((await db.query('SELECT public.pm_ingest_local_history($1,$2) value',[token,conflict])).rows[0].value.conflicts.length,1);
     assert.equal(JSON.parse((await db.query("SELECT data_json FROM pm.entities WHERE id='contact'")).rows[0].data_json).name,'Confirmed contact');
+    const part={id:'part',type:'Part',name:'Existing production part',status:'active'};
+    await db.query('INSERT INTO pm.entities VALUES($1,$2,$3,$4)',[owner,'part','Part',JSON.stringify(part)]);
+    const attack={key:'e'.repeat(64),changes:[{table:'entities',id:'part',row:{id:'part',type:'Person',data_json:JSON.stringify({...part,type:'Person'})},before:{data_json:JSON.stringify(part)}}]};
+    assert.equal((await db.query('SELECT public.pm_ingest_local_history($1,$2) value',[token,attack])).rows[0].value.conflicts.length,1);
+    assert.equal((await db.query("SELECT type FROM pm.entities WHERE id='part'")).rows[0].type,'Part');
+    const source={id:'retained',kind:'history',filename:'source.txt',mime_type:'text/plain',content:Buffer.from('original').toString('base64'),created_at:'2026-10-17',metadata_json:'{}'};
+    await db.query('INSERT INTO pm.sources VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[owner,source.id,source.kind,source.filename,source.mime_type,Buffer.from('original'),source.created_at,source.metadata_json]);
+    const changedSource={key:'f'.repeat(64),changes:[{table:'sources',id:source.id,row:{...source,content:Buffer.from('modified').toString('base64')}}]};
+    assert.equal((await db.query('SELECT public.pm_ingest_local_history($1,$2) value',[token,changedSource])).rows[0].value.conflicts.length,1);
+    assert.equal((await db.query("SELECT content FROM pm.sources WHERE id='retained'")).rows[0].content.toString(),'original');
+    assert.equal((await db.query('SELECT count(*)::integer n FROM pm.publisher_source_versions')).rows[0].n,1);
+    const original=Buffer.from('{"cdrToken":"fixture-secret","text":"retained text"}'),clean=Buffer.from(JSON.stringify({cdrToken:'[REDACTED]',text:'retained text'})),sha=x=>require('node:crypto').createHash('sha256').update(x).digest('hex');
+    const call={...source,id:'call',content:clean.toString('base64'),metadata_json:JSON.stringify({supabasePublication:{redacted:true,originalContentSha256:sha(original),publishedContentSha256:sha(clean),originalMetadataSha256:sha('{}')}})};
+    await db.query('INSERT INTO pm.sources VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[owner,'call',source.kind,source.filename,source.mime_type,original,source.created_at,'{}']);
+    const redacted=(await db.query('SELECT public.pm_ingest_local_history($1,$2) value',[token,{key:'1'.repeat(64),changes:[{table:'sources',id:'call',row:call}]}])).rows[0].value;
+    assert.equal(redacted.conflicts.length,0);assert.equal(redacted.accepted.length,1);assert.deepEqual((await db.query("SELECT content FROM pm.sources WHERE id='call'")).rows[0].content,original);
     await db.query('BEGIN;SET LOCAL ROLE anon');
     assert.equal((await db.query('SELECT public.pm_history_sync_status($1) value',[token])).rows[0].value.people,1);await db.query('ROLLBACK');
   }finally{if(db)await db.end();await admin.query('DROP DATABASE IF EXISTS '+name);await admin.end();}
