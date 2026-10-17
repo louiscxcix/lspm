@@ -5,19 +5,31 @@ const {randomUUID}=require('node:crypto');
 const {Client}=require('pg');
 const {verifyBackend}=require('./scripts/verify-supabase');
 const {applyMigrations}=require('./scripts/supabase-migrations');
+const {createCloudHandler}=require('./cloud-handler');
 
 test('release gate requires the actual application auth response and matching CORS',async()=>{
   const origin='https://louiscxcix.github.io';let calls=0;
   await verifyBackend({attempts:1,fetchImpl:async(url,options)=>{
     calls++;
+    if(url.endsWith('/public/workspace'))return Response.json({projects:[],library:{entities:[],relations:[]}});
     if(url.includes('/public/'))return Response.json({ok:true,readOnly:true});
     return options.method==='OPTIONS'?new Response(null,{status:204,headers:{'Access-Control-Allow-Origin':origin}}):Response.json({error:'Sign in to open your workspace.'},{status:401,headers:{'Access-Control-Allow-Origin':origin}});
   }});
-  assert.equal(calls,3);
+  assert.equal(calls,4);
   // A gateway auth error must not masquerade as a healthy, running application.
   await assert.rejects(verifyBackend({attempts:1,fetchImpl:async()=>Response.json({message:'Missing authorization header'},{status:401})}),/release check failed/);
   await assert.rejects(verifyBackend({attempts:1,fetchImpl:async()=>Response.json({error:'Sign in to open your workspace.'},{status:401})}),/frontend origin/);
   await assert.rejects(verifyBackend({attempts:1,fetchImpl:async()=>Response.json({ok:true},{status:200})}),/HTTP 200/);
+});
+
+test('release gate exercises public workspace through Supabase runtime path rewriting',async()=>{
+  let reads=0;
+  const handler=createCloudHandler({allowedOrigins:['https://louiscxcix.github.io'],authenticate:()=>{throw Error('Guest must not sign in');},withStore:()=>{throw Error('Guest must not open private store');},withPublicStore:fn=>fn({health:async()=>{},load:async()=>{reads++;return {projects:[],library:{entities:[],relations:[]}};}})});
+  const gatewayFetch=async(url,options)=>handler(new Request(url.replace('/functions/v1/ontology/','/ontology/'),options));
+  await verifyBackend({attempts:1,fetchImpl:gatewayFetch});
+  assert.equal(reads,1);
+  // A successful health check alone cannot publish a broken workspace.
+  await assert.rejects(verifyBackend({attempts:1,fetchImpl:async(url,options)=>url.endsWith('/public/workspace')?Response.json({error:'Unavailable'},{status:503}):gatewayFetch(url,options)}),/workspace data check failed: HTTP 503/);
 });
 
 test('migration runner applies the real initial schema, forward migrations and safe reruns', {skip:!process.env.TEST_DATABASE_URL},async()=>{

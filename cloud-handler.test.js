@@ -5,6 +5,26 @@ const {createCloudHandler}=require('./cloud-handler');
 const {openStore}=require('./local-store');
 const Projects=require('./projects');
 
+test('Supabase runtime and gateway paths reach public reads and authenticated editor routes',async t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pm-cloud-routing-')),store=openStore(path.join(dir,'test.sqlite'));
+  t.after(()=>{store.close();fs.rmSync(dir,{recursive:true,force:true});});
+  let signIns=0;
+  const handler=createCloudHandler({allowedOrigins:['https://louiscxcix.github.io'],authenticate:async()=>{signIns++;return {id:'editor'};},withStore:async(id,fn)=>fn(store),withPublicStore:fn=>fn(store)});
+  for(const prefix of ['/ontology','/functions/v1/ontology','']){
+    const request=(route,options={})=>handler(new Request('https://project.supabase.co'+prefix+'/api/'+route,{...options,headers:{Origin:'https://louiscxcix.github.io',...options.headers}}));
+    const health=await request('public/health');assert.equal(health.status,200,'public route under '+prefix);assert.deepEqual(await health.json(),{ok:true,readOnly:true});
+    assert.equal(health.headers.get('Access-Control-Allow-Origin'),'https://louiscxcix.github.io');
+    const workspace=await request('public/workspace');assert.equal(workspace.status,200);assert.deepEqual((await workspace.json()).projects,[]);
+    assert.equal((await request('public/workspace',{method:'POST'})).status,405);
+    assert.equal((await request('workspace')).status,401);
+    assert.equal((await request('workspace',{headers:{Authorization:'Bearer valid'}})).status,200);
+  }
+  assert.equal(signIns,3);
+  for(const pathname of ['/ontology-other/api/public/health','/functions/v1/ontology-other/api/public/health','/other/ontology/api/public/health']){
+    assert.equal((await handler(new Request('https://project.supabase.co'+pathname))).status,404);
+  }
+});
+
 test('cloud API authenticates before data access and restricts origins',async()=>{
   let touched=false;
   const handler=createCloudHandler({allowedOrigins:['https://louiscxcix.github.io'],authenticate:async token=>{if(token!=='valid')throw Error('bad');return {id:'user'};},withStore:async()=>{touched=true;}});

@@ -19,7 +19,10 @@ function createCloudHandler({authenticate,withStore,withPublicStore,allowedOrigi
     if(origin){headers.set('Access-Control-Allow-Origin',origin);headers.set('Access-Control-Allow-Headers','authorization,apikey,content-type,x-client-info');headers.set('Access-Control-Allow-Methods','GET,POST,PUT,OPTIONS');}
     if(request.method==='OPTIONS')return new Response(null,{status:204,headers});
     const url=new URL(request.url);
-    const pathname=url.pathname.replace(/^\/functions\/v1\/ontology/,'');
+    // Supabase's gateway strips /functions/v1 before forwarding to the runtime.
+    // Keep both forms for hosted requests and direct gateway-path tests.
+    const pathname=url.pathname.replace(/^\/(?:functions\/v1\/)?ontology(?=\/|$)/,'');
+    if(!pathname.startsWith('/api/'))return respond(404,{error:'Not found.'});
     if(pathname.startsWith('/api/public/')){
       if(request.method!=='GET')return respond(405,{error:'Public workspace is read-only.'});
       if(!withPublicStore)return respond(503,{error:'Public workspace is not configured.'});
@@ -51,7 +54,6 @@ function createCloudHandler({authenticate,withStore,withPublicStore,allowedOrigi
     let user;
     try{user=await authenticate(token);}catch{return respond(401,{error:'Your session has expired. Sign in again.'});}
     if(!user?.id)return respond(401,{error:'Sign in to open your workspace.'});
-    if(!pathname.startsWith('/api/'))return respond(404,{error:'Not found.'});
     let bytes;
     try{bytes=await bodyBytes(request);}catch{return respond(413,{error:'Request exceeds 16 MB.'});}
     try{

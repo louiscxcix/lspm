@@ -54,7 +54,8 @@ test('public workspace is pinned, readable without login, and cannot be changed 
       catch(error){return Response.json({code:error.code},{status:400});}
     }});
     const handler=createCloudHandler({allowedOrigins:['https://louiscxcix.github.io'],authenticate:async()=>{throw Error('No login');},withStore:()=>{throw Error('No login');},withPublicStore:fn=>fn(dataStore)});
-    const request=(route,method='GET')=>handler(new Request('https://example.supabase.co/functions/v1/ontology/api/'+route,{method}));
+    // Use the function-name prefix delivered by Supabase's hosted runtime.
+    const request=(route,method='GET')=>handler(new Request('https://example.supabase.co/ontology/api/'+route,{method}));
     let response=await request('public/workspace?owner_id='+other);assert.equal(response.status,200);
     const data=await response.json();assert.equal(data.projects.length,1);assert.equal(data.projects[0].name,'Visible project');
     assert.equal(data.pendingChange,null);assert.deepEqual(data.library.changes,[]);

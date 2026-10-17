@@ -11,7 +11,13 @@ async function verifyBackend({baseUrl='https://ahzpuefosoajwwgbfhng.supabase.co'
         if(response.headers.get('Access-Control-Allow-Origin')!==origin)throw Error('The deployed function does not allow the frontend origin.');
         const publicResponse=await fetchImpl(baseUrl+'/functions/v1/ontology/api/public/health',{headers:{Origin:origin},signal:AbortSignal.timeout(15000)});
         const publicBody=await publicResponse.json().catch(()=>({}));
-        if(publicResponse.status!==200||publicBody.ok!==true||publicBody.readOnly!==true)throw Error('Public workspace check failed: HTTP '+publicResponse.status+', code '+String(publicBody.code||'UNEXPECTED_RESPONSE')+', stage '+String(publicBody.stage||'public-health')+'.');
+        if(publicResponse.status!==200||publicBody.ok!==true||publicBody.readOnly!==true){
+          const code=publicBody.code||(publicBody.error==='Sign in to open your workspace.'?'PUBLIC_ROUTE_REQUIRES_LOGIN':'UNEXPECTED_RESPONSE');
+          throw Error('Public workspace check failed: HTTP '+publicResponse.status+', code '+String(code)+', stage '+String(publicBody.stage||'public-health')+'.');
+        }
+        const workspaceResponse=await fetchImpl(baseUrl+'/functions/v1/ontology/api/public/workspace',{headers:{Origin:origin},signal:AbortSignal.timeout(15000)});
+        const workspace=await workspaceResponse.json().catch(()=>({}));
+        if(workspaceResponse.status!==200||!Array.isArray(workspace.projects)||!Array.isArray(workspace.library?.entities)||!Array.isArray(workspace.library?.relations))throw Error('Public workspace data check failed: HTTP '+workspaceResponse.status+'.');
         const preflight=await fetchImpl(endpoint,{method:'OPTIONS',headers:{Origin:origin,'Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'authorization,apikey,content-type'},signal:AbortSignal.timeout(15000)});
         if(preflight.status!==204||preflight.headers.get('Access-Control-Allow-Origin')!==origin)throw Error('Frontend CORS preflight was rejected.');
         console.log('Public workspace and database reads are ready; private endpoints require authentication.');
