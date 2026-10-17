@@ -10,8 +10,8 @@ const Model = require('./ontology-model.js');
 const Ingest = require('./ingestion.js');
 const ASSESSMENT_FIELDS = new Set(['power','influence','currentRole','desiredRole','currentEngagement','desiredEngagement','assessmentNote','assessedOn']);
 const PROJECT_SCHEDULE_FIELDS = new Set(['status',...Model.DATE_FIELDS.filter(field=>field!=='assessedOn')]);
-const CORE_CHANGE_TABLES={projects:['id'],entities:['id'],project_memberships:['project_id','entity_id'],project_assessments:['project_id','entity_id'],project_schedules:['project_id','entity_id'],project_workstreams:['project_id','entity_id','code'],relations:['id'],entity_changes:['id'],ingestion_jobs:['id']};
-const CHANGE_TABLES={...CORE_CHANGE_TABLES,wip_snapshots:['id'],wip_counts:['id'],staffing_counts:['id'],production_staffing_counts:['id']};
+const CORE_CHANGE_TABLES={projects:['id'],entities:['id'],project_memberships:['project_id','entity_id'],project_assessments:['project_id','entity_id'],project_schedules:['project_id','entity_id'],project_workstreams:['project_id','entity_id','code'],project_view_settings:['project_id','view_key'],relations:['id'],entity_changes:['id'],ingestion_jobs:['id']};
+const CHANGE_TABLES={...CORE_CHANGE_TABLES,wip_snapshots:['id'],wip_counts:['id'],staffing_counts:['id'],production_staffing_counts:['id'],hourly_records:['id']};
 
 function openStore(dbPath) {
   fs.mkdirSync(path.dirname(dbPath), {recursive:true});
@@ -42,7 +42,13 @@ function openStore(dbPath) {
     UPDATE meta SET value='3' WHERE key='schema_version' AND value='2';
     UPDATE meta SET value='4' WHERE key='schema_version' AND value='3';
   `);
-  if(Number(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value)>4)throw Error('Database was created by a newer app version.');
+  if(Number(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get().value)>5)throw Error('Database was created by a newer app version.');
+  if(!db.prepare('PRAGMA table_info(projects)').all().some(column=>column.name==='project_type'))db.exec("ALTER TABLE projects ADD COLUMN project_type TEXT CHECK(project_type IS NULL OR project_type IN ('program','sample','npi','improvement','shared'))");
+  db.exec('CREATE TABLE IF NOT EXISTS hourly_records(id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES projects(id),data_json TEXT NOT NULL,recorded_at TEXT NOT NULL,revision INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS hourly_project ON hourly_records(project_id,revision)');
+  const history=require('./history-store')(db,load);
+  const hourly=require('./hourly-store')(db,load,history);
+  const preparation=require('./sample-preparation-store')(db,load);
+  db.prepare("UPDATE meta SET value='5' WHERE key='schema_version'").run();
   const read = (sql, ...params) => db.prepare(sql).all(...params);
   const rowKey=(table,row)=>JSON.stringify(CHANGE_TABLES[table].map(column=>row[column]));
   const snapshot=()=>Object.fromEntries(Object.keys(CORE_CHANGE_TABLES).map(table=>[table,read('SELECT * FROM '+table)]));
@@ -112,6 +118,7 @@ function openStore(dbPath) {
     const lanes=read('SELECT project_id,entity_id,code FROM project_workstreams');
     const projects = read('SELECT * FROM projects ORDER BY rowid').map(row => ({
       id:row.id, name:row.name, status:row.status, createdAt:row.created_at, updatedAt:row.updated_at, version:2,
+      ...(row.project_type==null?{}:{projectType:row.project_type}),
       entities:entities.filter(e => memberships.some(m => m.project_id===row.id && m.entity_id===e.id)).map(e => ({...e, ...assessments.get(row.id+':'+e.id), ...schedules.get(row.id+':'+e.id), projectId:row.id})),
       relations:relations.filter(r => (!r.scopeProjectId || r.scopeProjectId===row.id) && memberships.some(m => m.project_id===row.id && m.entity_id===r.from) && memberships.some(m => m.project_id===row.id && m.entity_id===r.to)).map(r => ({...r,projectId:row.id})),
       changes:changes.filter(c => (!c.scope || c.scope===row.id) && memberships.some(m => m.project_id===row.id && m.entity_id===c.change.entityId)).map(c => c.change),
@@ -121,11 +128,12 @@ function openStore(dbPath) {
     for (const row of read('SELECT project_id,view_key,data_json FROM project_view_settings')) {
       (viewSettings[row.project_id] ||= {})[row.view_key] = JSON.parse(row.data_json);
     }
-    return {revision, library, projects, viewSettings,pendingChange:pendingChange()};
+    const projectAliases=Object.fromEntries(Object.entries(viewSettings).filter(([,settings])=>settings.overview?.mergedInto).map(([id,settings])=>[id,settings.overview.mergedInto]));
+    return {revision, library, projects, viewSettings,projectAliases,pendingChange:pendingChange()};
   }
   function putSettings(projectId, viewKey, data) {
     if (projectId!=='library' && !db.prepare('SELECT id FROM projects WHERE id=?').get(projectId)) throw Error('Unknown project.');
-    if (!['overview','production','stakeholders','library',...Model.WORKSTREAMS.map(item=>'lens-'+item.code)].includes(viewKey) || !data || Array.isArray(data) || typeof data!=='object') throw Error('Invalid view settings.');
+    if (!['overview','production','stakeholders','library','universalGroups','eventHistory',...Model.WORKSTREAMS.map(item=>'lens-'+item.code)].includes(viewKey) || !data || Array.isArray(data) || typeof data!=='object') throw Error('Invalid view settings.');
     const value=JSON.stringify(data);
     if (value.length>16000) throw Error('View settings exceed 16 KB.');
     db.prepare('INSERT INTO project_view_settings(project_id,view_key,data_json) VALUES (?,?,?) ON CONFLICT(project_id,view_key) DO UPDATE SET data_json=excluded.data_json').run(projectId,viewKey,value);
@@ -143,10 +151,12 @@ function openStore(dbPath) {
       projectSchedules:read('SELECT * FROM project_schedules'),
       workstreams:read('SELECT * FROM project_workstreams'),
       viewSettings:read('SELECT * FROM project_view_settings'),
+      hourlyRecords:read('SELECT * FROM hourly_records'),
       changes:read('SELECT * FROM entity_changes'),
       changeSets:read('SELECT * FROM change_sets'),
       sources:read('SELECT * FROM sources').map(row => ({...row,content:Buffer.from(row.content).toString('base64')})),
       ingestionJobs:read('SELECT * FROM ingestion_jobs'),
+      eventChangeProposals:read('SELECT * FROM event_change_proposals'),
       wipSnapshots:read('SELECT * FROM wip_snapshots'),
       wipCounts:read('SELECT * FROM wip_counts'),
       staffingCounts:read('SELECT * FROM staffing_counts'),
@@ -160,6 +170,26 @@ function openStore(dbPath) {
     if(selected&&!db.prepare('SELECT id FROM wip_snapshots WHERE id=? AND project_id=?').get(selected,projectId))throw Error('Unknown WIP snapshot.');
     const counts=selected?read('SELECT source_row,source_column,product_code,part_label,part_id,stage_label,step_id,quantity FROM wip_counts WHERE snapshot_id=? ORDER BY source_row,source_column',selected).map(row=>({row:row.source_row,column:row.source_column,code:row.product_code,partName:row.part_label,partId:row.part_id||'',stage:row.stage_label,stepId:row.step_id||'',quantity:row.quantity})):[];
     return {snapshots,selected,counts};
+  }
+  function listProgress(projectId){
+    if(!load().projects.some(p=>p.id===projectId))throw Error('Unknown project.');
+    const snapshots=read('SELECT id,captured_at,filename,sheet,created_at FROM wip_snapshots WHERE project_id=? ORDER BY captured_at,created_at LIMIT 2000',projectId).map(r=>({id:r.id,capturedAt:r.captured_at,createdAt:r.created_at,unit:r.sheet.startsWith('Progress · ')?r.sheet.slice(11):'pcs'}));
+    const ids=new Set(snapshots.map(s=>s.id)),byId=new Map(snapshots.map(s=>[s.id,s]));
+    for(const job of read("SELECT draft_json FROM ingestion_jobs WHERE status='committed' AND json_extract(draft_json,'$.scope')=?",projectId)){const saved=JSON.parse(job.draft_json).committed;for(const id of saved?.snapshotIds||[]){const snapshot=byId.get(id);if(snapshot)snapshot.eventId=saved.eventIds?.[0]||'';}}
+    const rows=read('SELECT c.* FROM wip_counts c JOIN wip_snapshots s ON s.id=c.snapshot_id WHERE s.project_id=? ORDER BY s.captured_at,s.created_at LIMIT 100000',projectId).filter(r=>ids.has(r.snapshot_id)&&r.part_id&&r.step_id).map(r=>({...byId.get(r.snapshot_id),snapshotId:r.snapshot_id,partId:r.part_id,stepId:r.step_id,code:r.product_code,partName:r.part_label,stage:r.stage_label,row:r.source_row,column:r.source_column,quantity:r.quantity}));
+    return {snapshots,rows};
+  }
+  function saveProgress(input){
+    const G=require('./progress'),w=load(),p=w.projects.find(p=>p.id===input.projectId);
+    if(!p||p.status==='archived')throw Error('Open an active project.');if(input.revision!==w.revision)throw Error('STALE_REVISION');
+    if(typeof input.text!=='string'||!input.text.trim()||input.text.length>200000)throw Error('Paste 1–200,000 characters.');G.validate(p,input.rows);
+    const normalized=input.rows.map(r=>({partId:r.partId,stepId:r.stepId,capturedAt:G.timestamp(r.capturedAt),quantity:r.quantity,unit:G.unitKey(r.unit),code:Model.byId(p,r.partId).modelCode||'',row:Number.isSafeInteger(r.row)?r.row:1,column:Number.isSafeInteger(r.column)?r.column:1,stage:Model.byId(p,r.stepId).productionStage||Model.byId(p,r.stepId).name}));
+    const key=require('node:crypto').createHash('sha256').update(JSON.stringify(normalized)).update(input.text).digest('hex');
+    const source=history.source({scope:p.id,text:input.text,filename:'Production Progress · WIP',metadata:{provider:'progress',externalId:key,workstream:'production'}});
+    const old=db.prepare("SELECT draft_json FROM ingestion_jobs WHERE source_id=? AND status='committed'").get(source.sourceId);if(old)return {...JSON.parse(old.draft_json).committed,duplicate:true,workspace:load()};
+    if(input.uploadTime===true){const uploadedAt=new Date().toISOString();for(const row of normalized)row.capturedAt=uploadedAt;}
+    const job=history.newJob(source.sourceId,p.id),ready=history.finishJob(job.jobId,{events:[{title:'WIP 관측 · '+new Set(normalized.map(r=>r.capturedAt)).size+' 시점 / '+new Set(normalized.map(r=>r.partId)).size+' Part',summary:'Reviewed '+normalized.length+' WIP observations. Counts are observations, not production output. Existing process structure unchanged.',kind:'observation',statementMode:'observed_fact',verification:'reported',reportedAt:normalized.at(-1).capturedAt,subjectIds:[...new Set(normalized.flatMap(r=>[r.partId,r.stepId]))],sourceExcerpt:input.text.slice(0,4000),facets:['production'],proposals:[]}],dispositions:[{action:'event',text:'Reviewed WIP input; original source retained.'}]});
+    const result=history.commit({jobId:ready.jobId,selectedCandidateIds:ready.draft.events.map(e=>e.candidateId),revision:input.revision,progressRows:normalized,confirmCorrections:input.confirmCorrections===true});return {...result,workspace:load()};
   }
   function saveWip({projectId,revision,capturedAt,filename,sheet,rows}) {
     if(revision!==load().revision)throw Error('STALE_REVISION');
@@ -268,7 +298,7 @@ function openStore(dbPath) {
         if (scope!==null) throw Error('Project creation is outside the save scope.');
         continue;
       }
-      if (project.id!==scope && ['name','status','createdAt','updatedAt'].some(key=>project[key]!==before[key])) throw Error('Project metadata changed outside the save scope.');
+      if (project.id!==scope && ['name','status','createdAt','updatedAt','projectType'].some(key=>project[key]!==before[key])) throw Error('Project metadata changed outside the save scope.');
       if (project.id===scope && (before.status==='archived'||project.status==='archived') &&
           !isDeepStrictEqual([project.entities,project.relations,project.changes||[],project.workstreams||{}],[before.entities,before.relations,before.changes||[],before.workstreams||{}])) throw Error('Archived project is read only.');
     }
@@ -306,10 +336,10 @@ function openStore(dbPath) {
       for (const project of next.projects) {
         if (project.id!==scope && previous.projects.some(p=>p.id===project.id)) continue;
         if (known.has(project.id)) {
-          db.prepare('UPDATE projects SET name=?, status=?, updated_at=? WHERE id=?').run(project.name,project.status,project.updatedAt||new Date().toISOString(),project.id);
+          db.prepare('UPDATE projects SET name=?, status=?, updated_at=?, project_type=? WHERE id=?').run(project.name,project.status,project.updatedAt||new Date().toISOString(),project.projectType??null,project.id);
         } else {
           const now = new Date().toISOString();
-          db.prepare('INSERT INTO projects(id,name,status,created_at,updated_at) VALUES (?,?,?,?,?)').run(project.id,project.name,project.status,project.createdAt||now,project.updatedAt||now);
+          db.prepare('INSERT INTO projects(id,name,status,created_at,updated_at,project_type) VALUES (?,?,?,?,?,?)').run(project.id,project.name,project.status,project.createdAt||now,project.updatedAt||now,project.projectType??null);
         }
       }
       if (active) {
@@ -412,6 +442,33 @@ function openStore(dbPath) {
     } catch (error) { db.exec('ROLLBACK'); throw error; }
     return load();
   }
+  function mergeProject(sourceId,targetId,name,revision){
+    const w=load();if(revision!==w.revision)throw Error('STALE_REVISION');
+    const source=w.projects.find(p=>p.id===sourceId),target=w.projects.find(p=>p.id===targetId);
+    if(w.projectAliases[sourceId]===targetId&&!source?.entities.some(e=>Model.PROJECT_OWNED_TYPES.has(e.type)))return w;
+    if(!source||!target||sourceId===targetId||target.status!=='active')throw Error('Invalid project merge.');
+    if(typeof name!=='string'||!name.trim()||name.length>120)throw Error('Invalid project name.');
+    const capture=()=>({...snapshot(),wip_snapshots:read('SELECT * FROM wip_snapshots'),staffing_counts:read('SELECT * FROM staffing_counts'),production_staffing_counts:read('SELECT * FROM production_staffing_counts')});
+    db.exec('BEGIN IMMEDIATE');
+    try{
+      const before=capture(),now=new Date().toISOString();
+      for(const table of ['project_memberships','project_assessments','project_schedules','project_workstreams']){
+        const columns=Object.keys(db.prepare('SELECT * FROM '+table+' LIMIT 1').get()||{}).filter(c=>c!=='project_id');
+        if(columns.length)db.prepare('INSERT OR IGNORE INTO '+table+' (project_id,'+columns.join(',')+') SELECT ?,'+columns.join(',')+' FROM '+table+' WHERE project_id=?').run(targetId,sourceId);
+      }
+      for(const e of source.entities.filter(e=>Model.PROJECT_OWNED_TYPES.has(e.type)))for(const table of ['project_assessments','project_schedules','project_workstreams','project_memberships'])db.prepare('DELETE FROM '+table+' WHERE project_id=? AND entity_id=?').run(sourceId,e.id);
+      for(const row of read('SELECT * FROM relations WHERE scope_project_id=?',sourceId)){
+        const data={...JSON.parse(row.data_json),scopeProjectId:targetId};db.prepare('UPDATE relations SET scope_project_id=?,data_json=? WHERE id=?').run(targetId,JSON.stringify(data),row.id);
+      }
+      for(const e of w.library.entities){const ids=e.eventRecord?.scope?.projectIds;if(!ids?.includes(sourceId)||ids.includes(targetId))continue;const data=JSON.parse(db.prepare('SELECT data_json FROM entities WHERE id=?').get(e.id).data_json);data.eventRecord.scope.projectIds.push(targetId);db.prepare('UPDATE entities SET data_json=? WHERE id=?').run(JSON.stringify(data),e.id);}
+      for(const table of ['wip_snapshots','staffing_counts','production_staffing_counts'])db.prepare('UPDATE '+table+' SET project_id=? WHERE project_id=?').run(targetId,sourceId);
+      const settings={...(w.viewSettings[sourceId]?.overview||{}),mergedInto:targetId};db.prepare("INSERT INTO project_view_settings VALUES (?,'overview',?) ON CONFLICT(project_id,view_key) DO UPDATE SET data_json=excluded.data_json").run(sourceId,JSON.stringify(settings));
+      db.prepare('UPDATE projects SET name=?,updated_at=? WHERE id=?').run(name.trim(),now,targetId);db.prepare("UPDATE projects SET status='archived',updated_at=? WHERE id=?").run(now,sourceId);
+      db.prepare("UPDATE meta SET value=? WHERE key='revision'").run(String(revision+1));const after=capture(),rows=rowDiff(before,after);
+      db.prepare('INSERT INTO change_sets(id,scope,recorded_at,revision,items_json,rows_json,acknowledged_at) VALUES (?,?,?,?,?,?,?)').run('change-'+randomUUID(),targetId,now,revision+1,JSON.stringify(changeItems(rows,before,after)),JSON.stringify(rows),now);
+      db.exec('COMMIT');return load();
+    }catch(e){db.exec('ROLLBACK');throw e;}
+  }
   function keepChange(id){
     const current=pendingChange();
     if(!current||current.id!==id)throw Error('Change already reviewed or no longer latest.');
@@ -448,7 +505,7 @@ function openStore(dbPath) {
     }catch(error){db.exec('ROLLBACK');throw error;}
     return load();
   }
-  return {load, save, putSettings, exportAll, saveIngestion, listChanges, listWip, saveWip, listStaffing, saveStaffing, listProductionStaffing, saveProductionStaffing, keepChange, revertChange, close:() => db.close()};
+  return {history,load, save, mergeProject, putSettings, exportAll, saveIngestion, listChanges, listWip, saveWip, listProgress,saveProgress,listHourly:hourly.list,hourlySave:hourly.save,hourlyRateSave:hourly.rateSave,featureSave:hourly.featureSave,samplePreparationList:preparation.list,samplePreparationSave:preparation.save,listStaffing, saveStaffing, listProductionStaffing, saveProductionStaffing, keepChange, revertChange, backup:filename=>require('node:sqlite').backup(db,filename),close:() => db.close()};
 }
 
 module.exports = {openStore, ASSESSMENT_FIELDS, PROJECT_SCHEDULE_FIELDS};

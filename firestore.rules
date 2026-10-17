@@ -1,6 +1,89 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // privatePM/seed + versions/{version}/chunks/{chunk}: admin-uploaded,
+    // read-only private workspace/history baseline; never a Hosting asset.
+    // privatePM/state: {revision:int, updatedAt:timestamp}; revision +1 only.
+    // privatePM/records/uploads/{id}: immutable reviewed WIP + source + Event
+    // envelope {schemaVersion:1,ownerUid:string,payload:string,createdAt:timestamp}.
+    function isAuthenticated() { return request.auth != null; }
+    function isPMOwner() {
+      return isAuthenticated() && request.auth.token.email == 'delaserre1314@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+    function validObservation(data) {
+      return data.keys().hasAll(['schemaVersion','ownerUid','payload','createdAt'])
+        && data.keys().hasOnly(['schemaVersion','ownerUid','payload','createdAt'])
+        && data.schemaVersion == 1 && data.ownerUid == request.auth.uid
+        && data.ownerUid is string && data.ownerUid.size() <= 128
+        && data.payload is string && data.payload.size() > 0 && data.payload.size() <= 500000
+        && data.createdAt is timestamp && data.createdAt == request.time;
+    }
+    function validState(data) {
+      return data.keys().hasAll(['revision','updatedAt']) && data.keys().hasOnly(['revision','updatedAt'])
+        && data.revision is int && data.revision > 0 && data.revision == resource.data.revision + 1
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+    // projectCatalog: public names/login aliases only, no passwords or project content.
+    // projectViews: read-only sanitized payload, allowed only for its viewer UID or owner.
+    function validCatalog(data) {
+      return data.keys().hasAll(['name','status','locked','viewerUid','loginAlias','updatedAt'])
+        && data.keys().hasOnly(['name','status','locked','viewerUid','loginAlias','updatedAt','projectType'])
+        && (!('projectType' in data) || data.projectType in ['program','sample','npi','improvement','shared'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 120
+        && data.status in ['active','archived'] && data.locked is bool
+        && data.viewerUid is string && data.viewerUid.size() <= 128
+        && data.loginAlias is string && data.loginAlias.size() <= 254
+        && (data.locked ? data.viewerUid.size() > 0 && data.loginAlias.matches('viewer-.*@pm-view[.]invalid') : data.viewerUid == '' && data.loginAlias == '')
+        && data.updatedAt == request.time;
+    }
+    function validView(data) {
+      return data.keys().hasAll(['payload','updatedAt']) && data.keys().hasOnly(['payload','updatedAt'])
+        && data.payload is string && data.payload.size() > 0 && data.payload.size() <= 900000
+        && data.updatedAt == request.time;
+    }
+    match /projectCatalog/{projectId} {
+      allow read: if true;
+      allow create, update: if isPMOwner() && validCatalog(request.resource.data);
+      allow delete: if false;
+    }
+    match /projectViews/{projectId} {
+      allow read: if isPMOwner() || (exists(/databases/$(database)/documents/projectCatalog/$(projectId))
+        && get(/databases/$(database)/documents/projectCatalog/$(projectId)).data.status == 'active'
+        && (!get(/databases/$(database)/documents/projectCatalog/$(projectId)).data.locked
+          || isAuthenticated() && request.auth.uid == get(/databases/$(database)/documents/projectCatalog/$(projectId)).data.viewerUid));
+      allow create, update: if isPMOwner() && validView(request.resource.data);
+      allow delete: if false;
+    }
+    match /privatePM/seed {
+      allow read: if isPMOwner();
+      allow write: if false;
+      match /versions/{version}/chunks/{chunk} {
+        allow read: if isPMOwner();
+        allow write: if false;
+      }
+      // Owner-only read projections and on-demand History details; published by trusted admin only.
+      match /versions/{version}/scopes/{scopeId} {
+        allow read: if isPMOwner();
+        allow write: if false;
+      }
+      match /versions/{version}/events/{eventId} {
+        allow read: if isPMOwner();
+        allow write: if false;
+      }
+    }
+    match /privatePM/state {
+      allow read: if isPMOwner();
+      allow update: if isPMOwner() && validState(request.resource.data);
+      allow create, delete: if false;
+    }
+    match /privatePM/records/uploads/{upload} {
+      allow read: if isPMOwner();
+      allow create: if isPMOwner() && validObservation(request.resource.data)
+        && getAfter(/databases/$(database)/documents/privatePM/state).data.revision
+          == get(/databases/$(database)/documents/privatePM/state).data.revision + 1;
+      allow update, delete: if false;
+    }
     match /users/{userId}/workspace/{document} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }

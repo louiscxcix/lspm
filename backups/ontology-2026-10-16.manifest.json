@@ -1,0 +1,11 @@
+{
+  "format": "pm-local-sqlite-encrypted-v1",
+  "createdAt": "2026-10-17T01:45:21.513Z",
+  "databaseRevision": 338,
+  "encryption": {"cipher":"aes-256-cbc","kdf":"PBKDF2","iterations":200000,"keyFileCommitted":false},
+  "plaintextSha256": "0c5ffad2c43cad37d27bd77080ce6c356c2cc7a61ba7f6d0e4999bebb283e3cc",
+  "encryptedSha256": "53ecb978ee1c95dfcf321c8367f6fd1dff9a91e052939f71fc8769beb61b4abe",
+  "bytes": 15388704,
+  "counts": {"projects":6,"entities":1712,"relations":3922,"sources":849,"hourly_records":0,"wip_snapshots":0},
+  "roundTripAndIntegrityVerified": true
+}

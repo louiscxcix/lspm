@@ -11,6 +11,7 @@ public-build/
 *.bak
 *.log
 .DS_Store
+.impeccable/
 docs/**/*.png
 docs/**/*.jpg
 docs/**/*.jpeg

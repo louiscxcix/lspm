@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict'),{apply,areas}=require('./update-production-organization'),M=require('./ontology-model'),F=require('./workflow');
+const p={id:'test',entities:[],relations:[],workstreams:{}};
+const alexis=M.addEntity(p,{type:'Person',name:'Alexis'}),madian=M.addEntity(p,{type:'Person',name:'Madian'});
+apply(p);assert.equal(apply(p),false);
+assert.equal(M.byId(p,alexis.id).name,'Cesar Alexis Figueroa');assert.equal(M.byId(p,madian.id).name,'Madian Soto');
+assert.equal(Object.values(areas).reduce((s,a)=>s+a.counts.reduce((sum,n)=>sum+n,0),0),213);
+const ldmPeople=F.productionNetwork(p,{line:'LDM',showStakeholders:true}).nodes.filter(n=>n.entity.type==='Person');
+assert.equal(ldmPeople.filter(n=>n.entity.name!=='Juan Manuel Medina Romero').length,16);
+assert(ldmPeople.some(n=>n.entity.name==='Juan Manuel Medina Romero'),'Shared reporting head is context, not an extra LDM staffing count');
+assert.ok(F.productionNetwork(p,{line:'TEM',showStakeholders:true}).nodes.every(n=>n.entity.department!=='Factory / LDM'));
+assert.ok(!p.relations.some(r=>r.type==='assignment_scope'),'No station assignments invented');
+assert.equal(p.entities.filter(e=>e.type==='Evidence').length,5);
+console.log('Organization identities, 213 snapshot, line isolation and no station assignment checks passed');

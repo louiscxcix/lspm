@@ -1,0 +1,5 @@
+const M=require('./ontology-model'),F=require('./workflow');
+function apply(p){const line=p.entities.find(e=>e.type==='Resource'&&e.resourceKind==='line'&&e.name==='LDM');if(!line)throw Error('Missing LDM');let count=0;
+for(const n of F.productionNetwork(p).nodes){if(n.entity.type!=='Production Step'||n.entity.status==='archived'||['NG storage','Scrap'].includes(n.entity.productionStage))continue;const families=new Set(n.partIds.map(id=>M.byId(p,id)?.productionFamily||'unknown'));if(families.size!==1||!families.has('LDM')||p.relations.some(r=>r.from===n.id&&r.type==='operated_in'))continue;M.addRelation(p,{from:n.id,type:'operated_in',to:line.id,scopeProjectId:null,evidence:'Confirmed LDM route membership; line-level contact context only, no individual station assignment (2026-10-05).'});count++;}M.validateStore(p);return count;}
+module.exports={apply};
+if(require.main===module){const db=require('./local-store').openStore('../.local-data/ontology.sqlite');try{const w=db.load(),p=w.projects.find(p=>p.name==='LS'),count=apply(p);console.log(count?'Linked '+count+' processes; revision '+db.save(w,p.id,w.revision).revision:'Already applied');}finally{db.close();}}

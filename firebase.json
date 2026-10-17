@@ -1,7 +1,8 @@
 {
   "auth": {
-    "authorizedDomains": ["ontho-166a6.web.app", "ontho-166a6.firebaseapp.com", "localhost"],
+    "authorizedDomains": ["ontho-166a6.web.app", "ontho-166a6.firebaseapp.com", "louis-lgls-pm.web.app", "louis-lgls-pm.firebaseapp.com", "localhost"],
     "providers": {
+      "emailPassword": true,
       "googleSignIn": {
         "oAuthBrandDisplayName": "PM Process Twin",
         "supportEmail": "delaserre1314@gmail.com"
@@ -12,6 +13,10 @@
   "hosting": {
     "site": "louis-lgls-pm",
     "public": "public-build",
+    "headers": [
+      {"source": "/", "headers": [{"key": "Cache-Control", "value": "no-cache, no-store, must-revalidate"}]},
+      {"source": "/index.html", "headers": [{"key": "Cache-Control", "value": "no-cache, no-store, must-revalidate"}]}
+    ],
     "ignore": [
       "firebase.json",
       "README.md",

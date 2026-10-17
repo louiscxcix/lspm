@@ -1,0 +1,18 @@
+const assert=require('node:assert/strict'),M=require('./ontology-model'),F=require('./workflow'),{apply}=require('./update-storage');
+const p={id:'storage-test',entities:[],relations:[],workstreams:{}};
+const part=M.addEntity(p,{type:'Part',name:'Test product',itemKind:'product',productionFamily:'LDM'});
+const packing=M.addEntity(p,{type:'Production Step',name:'Packing',productionStage:'Packing'});
+M.addRelation(p,{from:packing.id,type:'applies_to',to:part.id});
+assert.equal(apply(p),true);assert.equal(apply(p),false);
+assert.ok(p.relations.some(r=>r.type==='manages'&&r.to==='ls-material-storage'));
+assert.equal(p.relations.filter(r=>r.type==='receives_from').length,2);
+assert.ok(!p.relations.some(r=>r.from==='ls-material-storage'&&r.type==='transfers_to'),'Unknown material destinations stay unknown');
+const graph=F.productionNetwork(p,{line:'LDM'});
+assert.ok(graph.nodes.some(n=>n.id==='ls-material-storage'));
+assert.ok(graph.edges.some(r=>r.from===packing.id&&r.to==='ls-packed-dispatch-storage'));
+assert.equal(F.productionNetwork(p,{line:'TEM'}).nodes.length,0);
+assert.equal(M.byId(p,'ls-smt-output-component').itemKind,'component');
+const shared=F.workstreamLanes(p);
+for(const scope of ['purchasing','logistics'])assert.ok(shared.entities.some(e=>e.id==='ls-material-storage'&&p.workstreams[e.id].includes(scope)));
+assert.ok(shared.edges.some(r=>r.type==='produces'&&r.to==='ls-smt-output-component'));
+console.log('Storage identity, provenance, manager, packing transfer and empty-line checks passed');

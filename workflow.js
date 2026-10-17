@@ -60,6 +60,8 @@
     return new Set([id, ...M.relationsFor(project, id).flatMap(r => [r.from, r.to]),...hierarchy]);
   }
   function projectGraph(project, options = {}) {
+    const history=typeof module==='object'?require('./history'):globalThis.EventHistory;
+    if(history)project=history.structure(project);
     const {types, query = "", status = "", start, end, focus, selectedId, keepPredecessors = false} = options;
     const scope = focus === "downstream" ? downstream(project, selectedId) : focus === "direct" ? neighborhood(project, selectedId) : null;
     const matches = M.search(project, query).filter(e => (!types || types.includes(e.type)) && (!status || e.status === status) && (!scope || scope.has(e.id)) && (options.showSubprocesses !== false || !isSubprocess(e)));
@@ -98,6 +100,71 @@
     }
     const entities=graph.entities.filter(entity=>visible.has(entity.id));
     return {entities,relations:graph.relations.filter(relation=>visible.has(relation.from)&&visible.has(relation.to)),context:new Set([...graph.context].filter(id=>visible.has(id))),boundary:new Set(entities.filter(entity=>!assigned.has(entity.id)&&crossTypes.has(entity.type)).map(entity=>entity.id))};
+  }
+  function workstreamRecords(project, code) {
+    return workstreamGraph(project,code).entities.filter(e=>e.status!=='archived');
+  }
+  function relatedRisks(project, entityId) {
+    const targets=new Set([entityId]);
+    // Only immediate operational context; never fan out through a shared asset.
+    for(const r of project.relations){
+      if(!['applies_to','consumes','produces','requires','assignment_scope'].includes(r.type))continue;
+      const other=r.from===entityId?r.to:r.to===entityId?r.from:null;
+      if(['Production Step','Work Item','Gate'].includes(M.byId(project,other)?.type))targets.add(other);
+      if(r.from===entityId&&r.type==='requires'&&['Production Step','Work Item'].includes(M.byId(project,entityId)?.type)&&M.byId(project,r.to)?.type==='Resource')targets.add(r.to);
+    }
+    const ids=new Set(project.relations.filter(r=>r.type==='potentially_affects'&&targets.has(r.to)).map(r=>r.from));
+    return project.entities.filter(e=>ids.has(e.id)&&['Risk','Issue'].includes(e.type)&&e.status!=='archived');
+  }
+  // Explicit line/process links only. Both firstContacts have priority 1; managers are later escalation.
+  function reportingContacts(project,entityId) {
+    const byId=new Map(project.entities.filter(e=>e.status!=='archived').map(e=>[e.id,e]));
+    const relations=project.relations.filter(r=>(!r.scopeProjectId||r.scopeProjectId===project.id)&&byId.has(r.from)&&byId.has(r.to)&&(!r.reviewState||r.reviewState==='confirmed')).slice().sort((a,b)=>a.id.localeCompare(b.id));
+    const isLine=e=>e?.type==='Resource'&&e.resourceKind==='line';
+    const used=new Map(),remember=r=>used.set(r.id,r),sort=items=>items.slice().sort((a,b)=>a.id.localeCompare(b.id));
+    const result={entityId,status:'unknown',line:null,lines:[],entryMode:'either',firstContacts:[],laterManagers:[],relations:[]};
+    let entity=byId.get(entityId);const visited=new Set();
+    while(entity&&!isLine(entity)&&!visited.has(entity.id)){
+      visited.add(entity.id);
+      if(!['Production Step','Work Item'].includes(entity.type))break;
+      const links=relations.filter(r=>r.from===entity.id&&['operated_in','requires'].includes(r.type)&&isLine(byId.get(r.to)));
+      if(links.length){links.forEach(remember);result.lines=sort([...new Set(links.map(r=>r.to))].map(id=>byId.get(id)));break;}
+      entity=byId.get(entity.parentWorkId);
+    }
+    if(isLine(entity))result.lines=[entity];
+    const roots=new Set();let cycle=false;
+    function ascend(id,path=new Set()) {
+      if(path.has(id)){cycle=true;return;}
+      const parents=relations.filter(r=>r.type==='part_of'&&r.from===id&&isLine(byId.get(r.to)));
+      if(!parents.length){roots.add(id);return;}
+      for(const r of parents){remember(r);ascend(r.to,new Set([...path,id]));}
+    }
+    result.lines.forEach(line=>ascend(line.id));
+    if(cycle||!roots.size)return result;
+    if(roots.size!==1){result.status='ambiguous';return result;}
+    result.line=byId.get([...roots][0]);
+    const entries=relations.filter(r=>r.type==='escalates_to'&&r.from===result.line.id&&byId.get(r.to)?.type==='Organization');
+    result.firstContacts=sort([...new Set(entries.map(r=>r.to))].map(id=>byId.get(id))).map(group=>{
+      const members=relations.filter(r=>r.type==='member_of'&&r.to===group.id&&byId.get(r.from)?.type==='Person');
+      members.forEach(remember);
+      return {group,priority:1,members:sort([...new Set(members.map(r=>r.from))].map(id=>byId.get(id)))};
+    });
+    entries.forEach(remember);
+    const groups=new Set(result.firstContacts.map(c=>c.group.id));
+    for(const r of relations)if(r.type==='escalates_to'&&groups.has(r.from)&&groups.has(r.to))remember(r);
+    const managers=relations.filter(r=>r.type==='manages'&&r.to===result.line.id&&byId.get(r.from)?.type==='Person');
+    managers.forEach(remember);
+    const queue=sort([...new Set(managers.map(r=>r.from))].map(id=>byId.get(id))),seen=new Set(queue.map(e=>e.id));
+    for(let i=0;i<queue.length;i++){
+      result.laterManagers.push(queue[i]);
+      for(const r of relations.filter(r=>r.type==='reports_to'&&r.from===queue[i].id&&byId.get(r.to)?.type==='Person')){
+        remember(r);if(!seen.has(r.to)){seen.add(r.to);queue.push(byId.get(r.to));}
+      }
+    }
+    for(const r of relations)if(r.type==='escalates_to'&&groups.has(r.from)&&seen.has(r.to))remember(r);
+    result.status=result.firstContacts.length?'resolved':'unknown';
+    result.relations=sort([...used.values()]);
+    return result;
   }
   function productionGraph(project, {partId="", layers=["parts","people","resources","gates"], query="", start="", end="", showSubprocesses=true, expandedIds=null}={}) {
     const layer=new Set(layers), parts=new Set(partId?[partId]:[]);
@@ -212,8 +279,8 @@
       return {step,parts,resources,workers,failures,assignments,lane};
     });
   }
-  function productionLanes(project,{partIds=null,query='',start='',end=''}={}) {
-    const allParts=project.entities.filter(M.isProductPart).sort((a,b)=>(a.productionFamily||'Unclassified').localeCompare(b.productionFamily||'Unclassified')||(a.productFamily||'').localeCompare(b.productFamily||'')||a.name.localeCompare(b.name));
+  function productionLanes(project,{partIds=null,line='',query='',start='',end=''}={}) {
+    const allParts=project.entities.filter(e=>M.isProductPart(e)&&(!line||e.productionFamily===line)).sort((a,b)=>(a.productionFamily||'Unclassified').localeCompare(b.productionFamily||'Unclassified')||(a.productFamily||'').localeCompare(b.productFamily||'')||a.name.localeCompare(b.name));
     const selected=new Set(partIds===null?allParts.map(e=>e.id):partIds);
     const lanes=allParts.filter(part=>selected.has(part.id)).map(part=>{
       const graph=productionGraph(project,{partId:part.id,layers:[],query,start,end,expandedIds:null});
@@ -229,11 +296,13 @@
       return {id:part.id,part,items,edges};
     });
     const linked=new Set(allParts.flatMap(part=>productionGraph(project,{partId:part.id,layers:[],expandedIds:null}).steps.map(e=>e.id)));
-    const unlinked=selected.size===allParts.length?project.entities.filter(e=>e.type==='Production Step'&&!linked.has(e.id)):[];
+    const unlinked=!line&&selected.size===allParts.length?project.entities.filter(e=>e.type==='Production Step'&&!linked.has(e.id)):[];
     return {lanes,edges:lanes.flatMap(lane=>lane.edges.map(edge=>({...edge,partId:lane.id}))),stepIds:new Set(lanes.flatMap(lane=>lane.items.map(item=>item.id))),unlinked};
   }
   function productionNetwork(project,options={}) {
+    project={...project,relations:project.relations.filter(r=>!r.scopeProjectId||r.scopeProjectId===project.id)};
     const routes=productionLanes(project,options),nodes=new Map(),edges=new Map();
+    const partSpecific=options.partIds!=null&&(options.showLineReferences===false||routes.lanes.length<project.entities.filter(e=>M.isProductPart(e)&&(!options.line||e.productionFamily===options.line)).length);
     for(const lane of routes.lanes)for(const item of lane.items){
       if(!nodes.has(item.id))nodes.set(item.id,{id:item.id,entity:item.entity,partIds:[],unconfirmed:item.lane==='unconfirmed'});
       const node=nodes.get(item.id);
@@ -252,18 +321,116 @@
       for(const item of lane.items)if(item.parentId&&nodes.has(item.parentId)&&!lane.edges.some(edge=>edge.type==='on_failure'&&edge.to===item.id))
         addEdge({id:'structure-'+item.id,type:'subprocess',from:item.parentId,to:item.id},lane.id);
     }
-    return {nodes:[...nodes.values()],edges:[...edges.values()],parts:routes.lanes.map(lane=>lane.part),unlinked:routes.unlinked};
+    // A recorded line output/storage flow is useful even before its detailed Part route exists.
+    const routeParts=new Set(routes.lanes.map(l=>l.id)),routeMaterials=new Set();
+    for(const r of project.relations)if(['consumes','produces'].includes(r.type)&&nodes.has(r.from)&&(!r.routePartId||routeParts.has(r.routePartId))&&(!partSpecific||!M.isProductPart(M.byId(project,r.to))||routeParts.has(r.to)))routeMaterials.add(r.to);
+    const lineNames=new Set(routes.lanes.map(l=>l.part.productionFamily).filter(Boolean));
+    const routeLines=new Set(project.relations.filter(r=>r.type==='operated_in'&&nodes.has(r.from)).map(r=>r.to));
+    const selectedLines=new Set(project.entities.filter(e=>e.type==='Resource'&&e.resourceKind==='line'&&(!options.line||e.name===options.line)&&(!partSpecific||routeLines.has(e.id)||lineNames.has(e.name))).map(e=>e.id));
+    if(!partSpecific){let count=-1;while(count!==selectedLines.size){count=selectedLines.size;for(const r of project.relations)if(r.type==='part_of'&&selectedLines.has(r.to)&&M.byId(project,r.from)?.resourceKind==='line')selectedLines.add(r.from);}}
+    // Line reference operations with unknown Part correspondence stay out of Part-specific maps.
+    if(options.showLineReferences??(options.partIds==null))for(const r of project.relations.filter(r=>r.type==='operated_in'&&selectedLines.has(r.to))){
+      const e=M.byId(project,r.from);
+      if(e?.type!=='Production Step'||e.status==='archived'||e.branchKind!=='support'||e.processLevel!=='main'||nodes.has(e.id))continue;
+      if(project.relations.some(link=>['applies_to','consumes','produces'].includes(link.type)&&link.from===e.id))continue;
+      nodes.set(e.id,{id:e.id,entity:e,partIds:[],unconfirmed:true});
+    }
+    for(const line of project.entities.filter(e=>e.type==='Resource'&&e.resourceKind==='line'&&e.status!=='archived'&&selectedLines.has(e.id)))
+      if(project.relations.some(r=>r.type==='produces'&&r.from===line.id&&r.reviewState!=='proposed'&&M.byId(project,r.to)?.itemKind==='component'&&(!partSpecific||routeMaterials.has(r.to))))
+        nodes.set(line.id,{id:line.id,entity:line,partIds:[],unconfirmed:false});
+    // Source-line rework policies can be shown before a detailed SMT product route exists.
+    if(options.line)for(const r of project.relations.filter(r=>r.type==='operated_in'&&selectedLines.has(r.to))){
+      const e=M.byId(project,r.from),parent=M.byId(project,e?.parentWorkId);
+      if(e?.status==='archived'||e?.branchKind!=='rework'||parent?.productionStage!=='NG storage'||partSpecific&&!nodes.has(parent.id))continue;
+      for(const item of [e,parent,...project.entities.filter(n=>n.productionStage==='Scrap'&&n.status!=='archived')])
+        nodes.set(item.id,{id:item.id,entity:item,partIds:[],unconfirmed:false});
+    }
+    for(const r of project.relations)if(['precedes','on_failure','rework_of'].includes(r.type))addEdge(r);
+    if(nodes.size){
+      const lineOutputs=new Set(project.relations.filter(r=>r.type==='produces'&&nodes.has(r.from)&&r.reviewState!=='proposed'&&(!r.routePartId||routeParts.has(r.routePartId))&&(!partSpecific||routeMaterials.has(r.to))).map(r=>r.to));
+      for(const id of lineOutputs){const e=M.byId(project,id);if(e&&M.isComponentPart(e)&&e.status!=='archived')nodes.set(id,{id,entity:e,partIds:[id],unconfirmed:false});}
+      for(const r of project.relations)if(r.type==='part_of'&&M.byId(project,r.from)?.resourceKind==='line'&&M.byId(project,r.to)?.resourceKind==='line')addEdge(r);
+      const connectedStorage=new Set(project.relations.filter(r=>r.type==='stored_at'&&lineOutputs.has(r.from)||r.type==='receives_from'&&nodes.has(r.to)).map(r=>r.type==='stored_at'?r.to:r.from));
+      if(partSpecific)for(const r of project.relations)if(r.type==='stored_at'&&(routeMaterials.has(r.from)||routeParts.has(r.from)))connectedStorage.add(r.to);
+      const storage=project.entities.filter(e=>e.type==='Resource'&&e.resourceKind==='facility'&&e.storageRole&&e.status!=='archived'&&(connectedStorage.has(e.id)||!partSpecific&&(routes.lanes.length||routes.unlinked.length)));
+      for(const entity of storage)nodes.set(entity.id,{id:entity.id,entity,partIds:routes.lanes.map(l=>l.id),unconfirmed:false});
+      for(const r of project.relations)if(r.type==='stored_at'&&storage.some(e=>e.id===r.to)&&(!partSpecific||routeMaterials.has(r.from)||routeParts.has(r.from))){
+        const item=M.byId(project,r.from);if(item&&item.status!=='archived')nodes.set(item.id,{id:item.id,entity:item,partIds:routes.lanes.map(l=>l.id),unconfirmed:false});
+      }
+      for(const r of project.relations){
+        if(['transfers_to','stored_at','produces'].includes(r.type))addEdge(r);
+        if(r.type==='receives_from'&&storage.some(e=>e.id===r.from)&&(!partSpecific||project.relations.some(link=>['supplies','produces'].includes(link.type)&&link.from===r.to&&routeMaterials.has(link.to)))){
+          const source=M.byId(project,r.to);if(!source)continue;
+          nodes.set(source.id,{id:source.id,entity:source,partIds:routes.lanes.map(l=>l.id),unconfirmed:false});
+          addEdge({...r,from:r.to,to:r.from});
+        }
+      }
+    }
+    if(options.showStakeholders){
+      for(const id of routeLines)if(M.byId(project,id)?.resourceKind==='line')selectedLines.add(id);
+      let count=-1;while(count!==selectedLines.size){count=selectedLines.size;for(const r of project.relations)if(r.type==='part_of'&&selectedLines.has(r.from)&&M.byId(project,r.to)?.resourceKind==='line')selectedLines.add(r.to);}
+      for(const scope of project.relations.filter(r=>r.type==='assignment_scope'&&nodes.has(r.to))){
+        const assignment=M.byId(project,scope.from);if(!assignment||assignment.status==='archived')continue;
+        for(const link of project.relations.filter(r=>r.type==='assigned_to'&&r.from===assignment.id)){
+          const person=M.byId(project,link.to);if(!person||person.status==='archived')continue;
+          nodes.set(person.id,{id:person.id,entity:person,partIds:[],unconfirmed:false});
+          addEdge({id:'staff-'+scope.id+'-'+link.id,from:person.id,to:scope.to,type:'assigned',evidence:[assignment.raci,assignment.role].filter(Boolean).join(' · ')});
+        }
+      }
+      for(const r of project.relations.filter(r=>r.type==='manages'&&nodes.has(r.to)&&M.byId(project,r.to)?.resourceKind==='facility')){
+        const manager=M.byId(project,r.from);if(manager&&manager.status!=='archived'){nodes.set(manager.id,{id:manager.id,entity:manager,partIds:[],unconfirmed:false});addEdge(r);}
+      }
+      const lines=project.entities.filter(e=>e.type==='Resource'&&e.resourceKind==='line'&&selectedLines.has(e.id));
+      for(const line of lines){
+        const teams=project.relations.filter(r=>r.type==='supports_line'&&r.to===line.id&&M.byId(project,r.from)?.type==='Organization');
+        for(const r of teams){const team=M.byId(project,r.from);if(team.status==='archived')continue;nodes.set(line.id,{id:line.id,entity:line,partIds:[],unconfirmed:false});nodes.set(team.id,{id:team.id,entity:team,partIds:[],unconfirmed:false});addEdge(r);for(const member of project.relations.filter(x=>x.type==='member_of'&&x.to===team.id)){const person=M.byId(project,member.from);if(person?.type==='Person'&&person.status!=='archived'){nodes.set(person.id,{id:person.id,entity:person,partIds:[],unconfirmed:false});addEdge(member);}}}
+        const links=project.relations.filter(r=>['manages','works_on'].includes(r.type)&&r.to===line.id&&M.byId(project,r.from)?.type==='Person');
+        if(!links.length)continue;
+        nodes.set(line.id,{id:line.id,entity:line,partIds:[],unconfirmed:false});
+        for(const r of links){const e=M.byId(project,r.from);if(e.status==='archived')continue;nodes.set(e.id,{id:e.id,entity:e,partIds:[],unconfirmed:false});addEdge(r);}
+      }
+      for(let pass=0;pass<5;pass++)for(const r of project.relations){
+        if(!['operated_in','member_of','reports_via','escalates_to','reports_to'].includes(r.type)||!nodes.has(r.from))continue;
+        const e=M.byId(project,r.to);if(!e||e.status==='archived')continue;
+        nodes.set(e.id,{id:e.id,entity:e,partIds:[],unconfirmed:false});addEdge(r);
+      }
+      // Contact context shares route highlights, while productionContextLayout keeps it beside the process.
+      const sources=[...nodes.values()].filter(n=>n.entity.type==='Production Step'||selectedLines.has(n.id));
+      for(const id of selectedLines)if(!nodes.has(id))sources.push({id,entity:M.byId(project,id),partIds:[]});
+      for(const source of sources){
+        const contact=reportingContacts(project,source.id);
+        for(const r of contact.relations){
+          for(const id of [r.from,r.to]){
+            if(!nodes.has(id)&&M.byId(project,id)?.type==='Production Step')continue;
+            if(!nodes.has(id))nodes.set(id,{id,entity:M.byId(project,id),partIds:[],unconfirmed:false});
+            const node=nodes.get(id);
+            if(node.entity.type!=='Production Step')for(const partId of source.partIds)if(!node.partIds.includes(partId))node.partIds.push(partId);
+          }
+          addEdge(r);for(const partId of source.partIds)addEdge(r,partId);
+        }
+      }
+    }
+    return {nodes:[...nodes.values()],edges:[...edges.values()],parts:routes.lanes.map(lane=>lane.part),unlinked:routes.unlinked,partOnly:partSpecific};
   }
   function networkLayout(nodes,edges,options={}) {
     const dispositions=nodes.filter(node=>['NG storage','Scrap'].includes(node.entity.productionStage));
     if(dispositions.length){
       const shared=new Set(dispositions.map(node=>node.id));
+      const returns=nodes.filter(node=>node.entity.branchKind==='rework'&&shared.has(node.entity.parentWorkId));
+      for(const node of returns)shared.add(node.id);
       const base=networkLayout(nodes.filter(node=>!shared.has(node.id)),edges.filter(edge=>!shared.has(edge.from)&&!shared.has(edge.to)),options);
       const anchors=edges.filter(edge=>edge.type==='on_failure'&&shared.has(edge.to)&&!shared.has(edge.from)).map(edge=>base.positions[edge.from]).filter(Boolean);
-      const x=anchors.length?Math.max(...anchors.map(p=>p.x))+240:base.width-210;
+      const x=returns.length?base.width+40:anchors.length?Math.max(...anchors.map(p=>p.x))+240:base.width-210;
       const y=anchors.length?anchors.reduce((sum,p)=>sum+p.y,0)/anchors.length:36;
       dispositions.sort((a,b)=>a.entity.productionStage==='NG storage'?-1:1).forEach((node,index)=>{base.positions[node.id]={x,y:y+index*130};});
-      base.width=Math.max(base.width,x+230);base.height=Math.max(base.height,y+dispositions.length*130+40);return base;
+      const ordered=returns.slice().sort((a,b)=>a.id.localeCompare(b.id));
+      // Repair before reinspection, independently for each producing source.
+      for(const edge of edges.filter(e=>e.type==='precedes'&&shared.has(e.from)&&shared.has(e.to))){
+        const a=ordered.findIndex(n=>n.id===edge.from),b=ordered.findIndex(n=>n.id===edge.to);
+        if(a>=0&&b>=0&&a>b)[ordered[a],ordered[b]]=[ordered[b],ordered[a]];
+      }
+      ordered.forEach((node,index)=>{base.positions[node.id]={x:x+260,y:y+index*130};});
+      base.width=Math.max(base.width,x+(returns.length?490:230));base.height=Math.max(base.height,y+Math.max(dispositions.length,returns.length)*130+40);return base;
     }
     const nodeById=new Map(nodes.map(node=>[node.id,node])),neighbors=new Map(nodes.map(node=>[node.id,new Set()]));
     for(const edge of edges)if(neighbors.has(edge.from)&&neighbors.has(edge.to)){neighbors.get(edge.from).add(edge.to);neighbors.get(edge.to).add(edge.from);}
@@ -279,7 +446,9 @@
     const positions={},nodeWidth=194,xGap=withContext?500:42,yGap=106,maxPerRank=withContext?6:4,canvasWidth=withContext?5000:1340,leftInset=withContext?238:28;
     let shelfX=leftInset,shelfY=36,shelfHeight=0,right=0;
     for(const ids of components){
-      const inComponent=new Set(ids),forward=edges.filter(edge=>inComponent.has(edge.from)&&inComponent.has(edge.to)&&['precedes','subprocess','on_failure','blocks','required_for','apqp_input_to'].includes(edge.type));
+      const entryLines=id=>edges.filter(e=>e.type==='escalates_to'&&e.to===id&&nodeById.get(e.from)?.entity.resourceKind==='line').map(e=>e.from);
+      const equivalentEntry=edge=>edge.type==='escalates_to'&&entryLines(edge.from).some(id=>entryLines(edge.to).includes(id));
+      const inComponent=new Set(ids),forward=edges.filter(edge=>inComponent.has(edge.from)&&inComponent.has(edge.to)&&!equivalentEntry(edge)&&['member_of','reports_via','escalates_to','reports_to','precedes','stored_at','produces','transfers_to','receives_from','subprocess','on_failure','blocks','required_for','apqp_input_to'].includes(edge.type));
       const incoming=new Map(ids.map(id=>[id,0])),rank=new Map(ids.map(id=>[id,0]));
       forward.forEach(edge=>incoming.set(edge.to,incoming.get(edge.to)+1));
       const queue=ids.filter(id=>incoming.get(id)===0);
@@ -298,13 +467,14 @@
           const parentOrder=parentA&&parentB?ids.indexOf(parentA.from)-ids.indexOf(parentB.from):0;
           return parentOrder||priority(a)-priority(b)||nodeById.get(a).entity.name.localeCompare(nodeById.get(b).entity.name)||a.localeCompare(b);
         });
-        items.forEach((id,index)=>{positions[id]={x:(index%maxPerRank)*(nodeWidth+xGap),y:localY+Math.floor(index/maxPerRank)*yGap};});
+        const occupied=new Set();
+        items.forEach((id,index)=>{const parent=forward.find(e=>e.to===id&&e.type==='precedes'&&positions[e.from]);let x=parent?positions[parent.from].x:(index%maxPerRank)*(nodeWidth+xGap);while(occupied.has(x))x+=nodeWidth+xGap;occupied.add(x);positions[id]={x,y:localY+Math.floor(index/maxPerRank)*yGap};});
         const satelliteHeight=withContext?Math.max(...items.map(id=>Math.max(context[id]?.inputs?.length+context[id]?.machines?.length||0,context[id]?.outputs?.length||0)*59+20),yGap):yGap;
         localY+=Math.ceil(items.length/maxPerRank)*satelliteHeight;
       }
       for(const edge of forward.filter(edge=>edge.type==='on_failure'))if(positions[edge.from]&&positions[edge.to])
         positions[edge.to].x=Math.max(positions[edge.to].x,positions[edge.from].x+nodeWidth+xGap);
-      const width=Math.max(...ids.map(id=>positions[id].x+nodeWidth+(withContext&&context[id]?.outputs?.length?216:0)));
+      const width=Math.max(...ids.map(id=>positions[id].x+nodeWidth+(withContext&&context[id]?.outputs?.length?216:0)))+(withContext?218:0);
       if(shelfX>leftInset&&shelfX+width>canvasWidth){shelfX=leftInset;shelfY+=shelfHeight+86;shelfHeight=0;}
       for(const id of ids){positions[id].x+=shelfX;positions[id].y+=shelfY;}
       shelfX+=width+90;shelfHeight=Math.max(shelfHeight,localY);right=Math.max(right,shelfX);
@@ -313,14 +483,23 @@
   }
   function productionContextLayout(project,projection,{showMachines=true,showComponents=true}={}) {
     const selected=new Set(projection.parts.map(part=>part.id)),context={};
+    let previous=-1;while(previous!==selected.size){previous=selected.size;for(const r of project.relations)if(r.type==='part_of'&&selected.has(r.to)&&M.isProductPart(M.byId(project,r.from)))selected.add(r.from);}
     for(const node of projection.nodes) {
       if(node.entity.type!=='Production Step')continue;
       const related=project.relations.filter(relation=>relation.from===node.id && (!relation.routePartId||selected.has(relation.routePartId)));
-      const materials=type=>related.filter(relation=>relation.type===type).map(relation=>({entity:M.byId(project,relation.to),relation})).filter(item=>['Part','Part Revision'].includes(item.entity?.type));
+      const materials=type=>related.filter(relation=>relation.type===type).map(relation=>({entity:M.byId(project,relation.to),relation})).filter(item=>['Part','Part Revision'].includes(item.entity?.type)&&(!projection.partOnly||M.isComponentPart(item.entity)||selected.has(item.entity.id)));
       const machines=related.filter(relation=>relation.type==='requires').map(relation=>({entity:M.byId(project,relation.to),relation})).filter(item=>['machine','test_equipment'].includes(item.entity?.resourceKind));
       context[node.id]={inputs:showComponents?materials('consumes'):[],outputs:showComponents?materials('produces'):[],machines:showMachines?machines:[]};
     }
-    const base=networkLayout(projection.nodes,projection.edges,{context,partOrder:projection.parts.map(part=>part.id)}),satellites=[];
+    const support=projection.nodes.filter(n=>['Person','Organization','Resource','Part','Part Revision'].includes(n.entity.type)),supportIds=new Set(support.map(n=>n.id));
+    const process=projection.nodes.filter(n=>!supportIds.has(n.id));
+    const base=networkLayout(process,projection.edges.filter(e=>!supportIds.has(e.from)&&!supportIds.has(e.to)),{context,partOrder:projection.parts.map(part=>part.id)}),satellites=[];
+    if(support.length){
+      const side=networkLayout(support,projection.edges.filter(e=>supportIds.has(e.from)&&supportIds.has(e.to)));
+      const offset=process.length?base.width+80:0;
+      for(const [id,pos] of Object.entries(side.positions))base.positions[id]={x:pos.x+offset,y:pos.y};
+      base.width=Math.max(base.width,offset+side.width);base.height=Math.max(base.height,side.height);
+    }
     for(const node of projection.nodes){
       const pos=base.positions[node.id],group=context[node.id];if(!pos||!group)continue;
       for(const [direction,items] of [['input',[...group.machines.map(item=>({...item,kind:'machine'})),...group.inputs.map(item=>({...item,kind:'part'}))]],['output',group.outputs.map(item=>({...item,kind:'part'}))]])
@@ -331,7 +510,10 @@
   function workstreamLanes(project,options={}) {
     const graph=projectGraph(project,options);
     const processTypes=new Set([...SCHEDULE_TYPES,'Decision']);
-    const entities=graph.entities.filter(e=>processTypes.has(e.type)&&!e.productionEventKind);
+    const storageRelations=graph.relations.filter(r=>['receives_from','stored_at','transfers_to','manages'].includes(r.type));
+    const storageIds=new Set(storageRelations.flatMap(r=>[r.from,r.to]));
+    for(const r of graph.relations)if(r.type==='produces'&&storageIds.has(r.to))storageIds.add(r.from);
+    const entities=graph.entities.filter(e=>(processTypes.has(e.type)||storageIds.has(e.id))&&!e.productionEventKind&&!e.qualityKind&&e.status!=='archived');
     const codes=new Set(M.WORKSTREAMS.map(item=>item.code));
     const lanes=[...M.WORKSTREAMS.map(item=>({code:item.code,label:item.label,items:[]})),{code:'unassigned',label:'Unassigned',items:[]}];
     for(const entity of entities){
@@ -340,7 +522,7 @@
       lane.items.push({id:entity.id,entity,secondary:memberships.slice(1)});
     }
     const ids=new Set(entities.map(e=>e.id));
-    const edges=graph.relations.filter(r=>ids.has(r.from)&&ids.has(r.to)&&['precedes','blocks','required_for','condition_target','apqp_input_to','on_failure','rework_of','potentially_affects','subprocess'].includes(r.type));
+    const edges=graph.relations.filter(r=>ids.has(r.from)&&ids.has(r.to)&&['receives_from','stored_at','transfers_to','manages','produces','precedes','blocks','required_for','condition_target','apqp_input_to','on_failure','rework_of','potentially_affects','subprocess'].includes(r.type)).map(r=>r.type==='receives_from'?{...r,from:r.to,to:r.from}:r);
     return {lanes,edges,entities,context:graph.context};
   }
   function productionLaneLayout(projection) {
@@ -581,5 +763,9 @@
   }
   const api = {OBJECT_COLUMNS,RELATION_COLUMNS,SCHEDULE_TYPES,isSubprocess,range,overlaps,ganttWindow,downstream,localGraph,neighborhood,projectGraph,workstreamGraph,productionGraph,productionLanes,productionNetwork,networkLayout,productionContextLayout,productionLaneLayout,workstreamLanes,workstreamLaneLayout,partSummary,partFocusedGraph,workstreamSummary,productionLayout,partWorkflow,layout,parseCSV,previewCSV,importedIds};
   api.belongsToPart=(item,partId)=>!partId||(item.partIds||[]).includes(partId)&&(!item.relation?.routePartId||item.relation.routePartId===partId);
+  api.workstreamRecords=workstreamRecords;
+  api.relatedRisks=relatedRisks;
+  api.reportingContacts=reportingContacts;
+  api.selectionNeighborhood=(project,ids)=>new Set([...ids].flatMap(id=>[...neighborhood(project,id)]));
   if (typeof module === "object") module.exports = api; else root.PMWorkflow = api;
 })(globalThis);

@@ -7,8 +7,16 @@ const {openStore} = require('./local-store.js');
 const Ingest = require('./ingestion.js');
 const Model = require('./ontology-model.js');
 const WIP = require('./wip.js');
+const Copilot = require('./copilot.js');
 
-const ASSETS = new Set(['index.html','styles.css','ontology-model.js','projects.js','import-resolver.js','ingestion.js','workflow.js','production-logs.js','analysis-views.js','apqp.js','local-api.js','app.js']);
+const ASSETS = new Set(['index.html','styles.css','map-groups.js','ontology-model.js','projects.js','import-resolver.js','ingestion.js','workflow.js','production-logs.js','analysis-views.js','apqp.js','local-api.js','app.js']);
+ASSETS.add('history.js');ASSETS.add('history-view.js');
+ASSETS.add('access-ui.js');
+ASSETS.add('progress.js');ASSETS.add('progress-view.js');
+ASSETS.add('map-assistant.js');ASSETS.add('map-assistant-view.js');
+ASSETS.add('hourly.js');ASSETS.add('hourly-view.js');ASSETS.add('project-password.js');
+ASSETS.add('quality-map.js');
+for(const file of ['project-types.js','sample-preparation.js','sample-preparation-view.js','sample-preparation.css'])ASSETS.add(file);
 const MIME = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8'};
 const EXTRACTION_SCHEMA={
   type:'object',properties:{
@@ -26,8 +34,10 @@ const EXTRACTION_SCHEMA={
     unresolved:{type:'array',items:{type:'object',properties:{text:{type:'string'},reason:{type:'string'}},required:['text','reason']}}
   },required:['summary','objects','relationships','unresolved']
 };
-function createServer({dbPath=path.join(__dirname,'..','.local-data','ontology.sqlite'),port=4173,geminiKey=process.env.GEMINI_API_KEY||'',geminiFetch=globalThis.fetch}={}) {
+function createServer({dbPath=path.join(__dirname,'..','.local-data','ontology.sqlite'),port=4173,accessPath=null,initialPassword,geminiKey=process.env.GEMINI_API_KEY||'',geminiFetch=globalThis.fetch,openaiKey=process.env.OPENAI_API_KEY||'',openaiModel=process.env.OPENAI_MODEL||'gpt-6-luna',openaiFetch=globalThis.fetch}={}) {
   const store = openStore(dbPath);
+  const access=accessPath?require('./access').createAccess(accessPath,{initialPassword}):null;
+  let copilotBusy=false;
   const json = (res,status,value) => {res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));};
   const readJson = async req => {
     if (!String(req.headers['content-type']||'').startsWith('application/json')) throw Error('Use application/json.');
@@ -50,8 +60,45 @@ function createServer({dbPath=path.join(__dirname,'..','.local-data','ontology.s
     if (origin && !["http://127.0.0.1:"+currentPort,"http://localhost:"+currentPort].includes(origin)) {json(res,403,{error:'Foreign origin blocked.'});return;}
     const url=new URL(req.url,'http://127.0.0.1'),pathname=url.pathname;
     try {
-      if (req.method==='GET' && pathname==='/api/health') {json(res,200,{ok:true,aiConfigured:Boolean(geminiKey)});return;}
-      if (req.method==='GET' && pathname==='/api/workspace') {json(res,200,store.load());return;}
+      if(access){
+        if(pathname.startsWith('/api/'))res.setHeader('Cache-Control','no-store');
+        if(await access.handle(req,res,url,readJson,json))return;
+        if(!access.authenticated(req)&&pathname.startsWith('/api/')){
+          if(req.method==='GET'&&pathname==='/api/workspace'){json(res,200,access.basicWorkspace(store.load()));return;}
+          if(req.method==='GET'&&pathname==='/api/health'){json(res,200,{ok:true,aiConfigured:false,copilotConfigured:false,access:{enabled:true,mode:'basic'}});return;}
+          const projectId=access.basicWorkspace(store.load()).access.projectId;
+          if(req.method==='GET'&&['/api/wip','/api/progress','/api/staffing','/api/production-staffing'].includes(pathname)&&projectId&&url.searchParams.get('project')===projectId){json(res,200,require('./access').basicMetrics(store,pathname,projectId));return;}
+          json(res,401,{error:'내 전용 로그인이 필요합니다.'});return;
+        }
+      }
+      if(await require('./history-http')({req,res,url,store,readJson,json,geminiKey,geminiFetch,openaiKey,openaiFetch,openaiModel}))return;
+      if (req.method==='GET' && pathname==='/api/health') {json(res,200,{ok:true,aiConfigured:Boolean(geminiKey),mapAssistantConfigured:Boolean(geminiKey),copilotConfigured:Boolean(openaiKey),copilotModel:openaiModel});return;}
+      if(req.method==='POST'&&pathname==='/api/map-assistant'){
+        if(copilotBusy){json(res,429,{error:'AI 답변 중입니다. 잠시 후 다시 시도하세요.'});return;}
+        const input=await readJson(req);if(input.consent!==true)throw Error('Gemini 데이터 전송 승인이 필요합니다.');
+        const ws=store.load(),scope=input.scopeId==='library'?ws.library:ws.projects.find(p=>p.id===input.scopeId);if(!scope)throw Error('지도 범위를 확인하세요.');
+        copilotBusy=true;try{json(res,200,await require('./map-assistant-server').answer({scope,input,key:geminiKey,fetchImpl:geminiFetch}));}finally{copilotBusy=false;}return;
+      }
+      if(req.method==='POST'&&pathname==='/api/copilot'){
+        if(copilotBusy){json(res,429,{error:'Copilot is answering another question. Please wait.'});return;}
+        const input=await readJson(req);
+        if(input.consent!==true)throw Error('Approve sending the question, recent conversation and project data to OpenAI.');
+        const project=store.load().projects.find(p=>p.id===input.projectId);
+        if(!project)throw Error('Choose an existing project for Copilot.');
+        if(copilotBusy){json(res,429,{error:'Copilot is answering another question. Please wait.'});return;}
+        copilotBusy=true;
+        try{json(res,200,await Copilot.answer({project,question:input.question,history:input.history,key:openaiKey,model:openaiModel,fetchImpl:openaiFetch}));}finally{copilotBusy=false;}
+        return;
+      }
+      if (req.method==='GET' && pathname==='/api/workspace') {json(res,200,{...store.load(),...(access?{access:{enabled:true,mode:'owner'}}:{})});return;}
+      if(req.method==='GET'&&pathname==='/api/hourly'){json(res,200,store.listHourly(url.searchParams.get('project')||''));return;}
+      if(req.method==='POST'&&pathname==='/api/hourly'){json(res,200,store.hourlySave(await readJson(req)));return;}
+      if(req.method==='POST'&&pathname==='/api/hourly/rates'){json(res,200,store.hourlyRateSave(await readJson(req)));return;}
+      if(req.method==='POST'&&pathname==='/api/features'){json(res,200,store.featureSave(await readJson(req)));return;}
+      if(req.method==='GET'&&pathname==='/api/sample-preparation'){json(res,200,store.samplePreparationList(url.searchParams.get('project')||''));return;}
+      if(req.method==='POST'&&pathname==='/api/sample-preparation'){json(res,200,store.samplePreparationSave(await readJson(req)));return;}
+      if(req.method==='GET'&&pathname==='/api/progress'){json(res,200,store.listProgress(url.searchParams.get('project')||''));return;}
+      if(req.method==='POST'&&pathname==='/api/progress'){json(res,200,store.saveProgress(await readJson(req)));return;}
       if(req.method==='GET'&&pathname==='/api/wip'){
         json(res,200,store.listWip(url.searchParams.get('project')||'',url.searchParams.get('snapshot')||''));return;
       }
@@ -104,7 +151,7 @@ function createServer({dbPath=path.join(__dirname,'..','.local-data','ontology.s
       if(req.method==='POST'&&changeRoute){
         json(res,200,changeRoute[2]==='keep'?store.keepChange(changeRoute[1]):store.revertChange(changeRoute[1],(await readJson(req)).revision));return;
       }
-      const settingsRoute=pathname.match(/^\/api\/settings\/([A-Za-z0-9_-]+)\/(overview|production|stakeholders|library|lens-(?:commercial|engineering|purchasing|production|quality|logistics))$/);
+      const settingsRoute=pathname.match(/^\/api\/settings\/([A-Za-z0-9_-]+)\/(overview|production|stakeholders|library|universalGroups|eventHistory|lens-(?:commercial|engineering|purchasing|production|quality|logistics))$/);
       if (req.method==='PUT' && settingsRoute) {
         json(res,200,store.putSettings(settingsRoute[1],settingsRoute[2],await readJson(req)));return;
       }
@@ -170,7 +217,9 @@ function createServer({dbPath=path.join(__dirname,'..','.local-data','ontology.s
 }
 
 if (require.main===module) {
-  createServer({port:Number(process.env.PORT)||4173,dbPath:process.env.PM_DB_PATH||undefined}).listen()
+  const envPath=path.join(__dirname,'.env');
+  if(fs.existsSync(envPath))process.loadEnvFile(envPath);
+  createServer({port:Number(process.env.PORT)||4173,dbPath:process.env.PM_DB_PATH||undefined,accessPath:path.join(path.dirname(process.env.PM_DB_PATH||path.join(__dirname,'..','.local-data','ontology.sqlite')),'access.json')}).listen()
     .then(url => process.stdout.write('PM Process Twin local: '+url+'\n'))
     .catch(error => {process.stderr.write(error.message+'\n');process.exitCode=1;});
 }

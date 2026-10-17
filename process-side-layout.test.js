@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict'),M=require('./ontology-model'),F=require('./workflow');
+const p={id:'test',entities:[],relations:[],workstreams:{}};
+const part=M.addEntity(p,{type:'Part',name:'Product',itemKind:'product',productionFamily:'LDM'}),a=M.addEntity(p,{type:'Production Step',name:'A'}),b=M.addEntity(p,{type:'Production Step',name:'B'}),line=M.addEntity(p,{type:'Resource',name:'LDM',resourceKind:'line'}),person=M.addEntity(p,{type:'Person',name:'Leader'});
+for(const step of [a,b])M.addRelation(p,{from:step.id,type:'applies_to',to:part.id});
+M.addRelation(p,{from:a.id,type:'precedes',to:b.id});M.addRelation(p,{from:person.id,type:'works_on',to:line.id});
+require('./update-ldm-process-contacts').apply(p);
+const plain=F.productionContextLayout(p,F.productionNetwork(p,{line:'LDM'}));
+const withPeople=F.productionContextLayout(p,F.productionNetwork(p,{line:'LDM',showStakeholders:true}));
+assert.deepEqual(withPeople.positions[a.id],plain.positions[a.id]);assert.deepEqual(withPeople.positions[b.id],plain.positions[b.id]);
+assert.equal(withPeople.positions[a.id].x,withPeople.positions[b.id].x);
+assert.ok(withPeople.positions[person.id].x>withPeople.positions[a.id].x+194);
+assert.ok(withPeople.positions[line.id].x>withPeople.positions[a.id].x+194);
+console.log('Straight process route and independent stakeholder side placement passed');

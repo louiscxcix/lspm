@@ -601,6 +601,8 @@ assert.equal(Flow.partWorkflow(routeProject,'part-g65').find(row=>row.step.id===
 console.log('Production fold, route lanes, and unassigned operator projection checks passed');
 assert.match(appContract,/Flow\.productionNetwork/);
 assert.match(appContract,/Flow\.productionContextLayout/);
+const spacedRoutes=Flow.networkLayout([{id:'a',entity:{name:'A'},partIds:['a']},{id:'b',entity:{name:'B'},partIds:['b']}],[],{context:{a:{machines:[{}],inputs:[],outputs:[]},b:{machines:[{}],inputs:[],outputs:[]}},partOrder:['a','b']});
+assert.ok(spacedRoutes.positions.b.x-218>=spacedRoutes.positions.a.x+194+24,'Neighbor machine chip stays clear of previous route step');
 assert.doesNotMatch(appContract,/data-production-expand/,'All Production steps are visible without expansion');
 assert.match(appContract,/failure-step/);
 assert.match(appContract,/Order not recorded/);

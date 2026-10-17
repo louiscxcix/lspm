@@ -1,0 +1,14 @@
+ICT,FW download,Router,Integration,TIM,Wire harness,Coating,Coating inspection,Array cutting,LAM assembly,Stacking,Screw assembly,Screw 1 Assembly (box 1),Screw 1 Assembly (box 2),Press bending #1–#5,Connector fastening,EOL,Vision inspection,Visual inspection,Packing
+G65 main (route label),85,65,350,100,-,-,-,-,-,60,50,-,-,-,-,-,35,-,25,20
+LQ2 primary light source,-,-,-,-,80,65,-,-,-,-,-,-,-,-,-,-,50,40,30,25
+LQ2 OPT,140,-,310,-,-,-,110,95,-,-,-,-,-,-,-,-,70,-,50,40
+LQ2 STD,-,-,110,-,-,-,-,-,-,-,-,-,-,-,-,-,45,-,30,25
+LQ2 LWR,-,-,-,-,-,-,-,-,100,80,70,60,-,-,-,-,45,-,35,30
+G65 Side Marker LH,-,-,-,-,-,-,-,-,-,70,55,-,-,-,-,-,40,-,35,25
+G65 Side Marker RH,-,-,-,-,-,-,-,-,-,75,60,-,-,-,-,-,45,-,40,30
+G65 Cornering LH,70,-,-,-,-,-,-,-,-,55,-,-,-,-,-,-,35,-,25,20
+G65 Cornering RH,80,-,-,-,-,-,-,-,-,60,-,-,-,-,-,-,40,-,30,25
+T1XL LH Lower + Upper,120,90,270,-,-,-,-,-,-,-,-,-,70,65,-,-,50,-,40,30
+T1XL RH Lower + Upper,130,100,280,-,-,-,-,-,-,-,-,-,75,70,-,-,55,-,45,35
+T1-2 Uplevel,100,-,-,-,-,-,-,-,-,-,-,-,-,-,80,70,45,-,35,25
+T1-2 Base,-,-,-,-,-,-,-,-,-,-,-,-,-,-,-,-,70,-,50,40
