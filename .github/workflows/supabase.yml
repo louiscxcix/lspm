@@ -1,90 +1,25 @@
-name: Test and deploy Supabase app
+name: Configure shared production database
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
-
+    inputs:
+      scram_verifier:
+        description: SCRAM verifier for the new scoped production login, never a raw password
+        required: true
+        type: string
 permissions:
   contents: read
-
 concurrency:
-  group: supabase-${{ github.ref }}
+  group: production-database-connection
   cancel-in-progress: false
-
 jobs:
-  test:
+  provision:
     runs-on: ubuntu-24.04
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_PASSWORD: local-test-only
-        ports: ['5432:5432']
-        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
-    env:
-      TEST_DATABASE_URL: postgresql://postgres:local-test-only@localhost:5432/postgres
-      CHROME_PATH: /usr/bin/google-chrome
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 24.19.0
-          cache: npm
-      - run: npm ci
-      - run: psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/test-bootstrap.sql -f supabase/migrations/202610160001_ontology.sql -f supabase/migrations/202610170001_public_workspace.sql -f supabase/migrations/202610170002_public_data_api.sql -f supabase/migrations/202610170003_backup_recovery.sql
-      - run: npm test
-      - run: npm run build:supabase && npm run build:cloud
-
-  deploy:
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: test
-    runs-on: ubuntu-24.04
-    environment:
-      name: github-pages
-      url: ${{ steps.pages.outputs.page_url }}
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    steps:
-      - uses: actions/checkout@v5
-      - name: Check GitHub Pages configuration
-        uses: actions/configure-pages@v5
-        id: pages_config
-      - name: Explain required Pages setup
-        if: failure() && steps.pages_config.outcome == 'failure'
-        run: |
-          cat >> "$GITHUB_STEP_SUMMARY" <<'PAGES'
-          GitHub Pages configuration could not be loaded. Open
-          https://github.com/louiscxcix/lspm/settings/pages
-          and set **Build and deployment → Source → GitHub Actions**.
-          Save the setting, then rerun this workflow. If it is already selected,
-          check repository access and the Pages availability message on that page.
-          PAGES
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24.19.0
-          cache: npm
-      - run: npm ci
-      - run: npm run build:supabase
-      - name: Apply Supabase database migrations
-        run: node scripts/deploy-supabase.js --schema-only
+      - run: node integration/provision-production.cjs
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      - name: Inspect stored and published data counts
-        run: node scripts/inspect-supabase-data.js
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      - name: Deploy Supabase Edge Function
-        run: node scripts/deploy-supabase.js --function-only
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      - name: Verify hosted Supabase endpoint
-        run: node scripts/verify-supabase.js
-      - run: npm run build:cloud
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: public-build
-      - uses: actions/deploy-pages@v4
-        id: pages
+          PRODUCTION_PASSWORD_VERIFIER: ${{ inputs.scram_verifier }}
