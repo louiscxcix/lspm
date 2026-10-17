@@ -66,15 +66,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24.19.0
-      - name: Fetch the verified original backup
-        uses: actions/checkout@v5
-        with:
-          ref: 7f64307c651404f97596d8b0210401cd247c3b61
-          path: backup-source
-          sparse-checkout: backups
-          persist-credentials: false
       - name: Restore original records into an empty Supabase project
-        run: node scripts/restore-original-backup.js backup-source/backups restore-report.json
+        run: node scripts/restore-original-backup.js backups restore-report.json
         env:
           LSPM_DB_BACKUP_KEY: ${{ secrets.LSPM_DB_BACKUP_KEY }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

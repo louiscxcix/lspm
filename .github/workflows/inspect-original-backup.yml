@@ -24,15 +24,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24.19.0
-      - name: Fetch the original encrypted backup
-        uses: actions/checkout@v5
-        with:
-          ref: 7f64307c651404f97596d8b0210401cd247c3b61
-          path: backup-source
-          sparse-checkout: backups
-          persist-credentials: false
       - name: Verify key, checksums, integrity and schema
-        run: node scripts/inspect-encrypted-backup.js backup-source/backups backup-metadata.json
+        run: node scripts/inspect-encrypted-backup.js backups backup-metadata.json
         env:
           LSPM_DB_BACKUP_KEY: ${{ secrets.LSPM_DB_BACKUP_KEY }}
       - name: Save schema and count report only

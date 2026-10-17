@@ -63,7 +63,7 @@ After importing, sign in, inspect real projects and relations, export again, and
 
 If Global Library is empty, open the latest GitHub Actions run's **Summary → Supabase data status**. The deployment diagnostic uses the existing repository secret to count all objects and the pinned public owner's objects without printing object contents or user IDs. `NO_OBJECTS` means the original objects have not reached this Supabase project; `PUBLIC_WORKSPACE_EMPTY` means objects exist under another owner and publication needs review; `PUBLIC_DATA_PRESENT` means the public owner has objects and the frontend/API should be investigated. These counts do not restore or modify any data. Local exports and database files are ignored by Git, so deploying repository code does not transfer them.
 
-An original encrypted database was found on `backup/local-pm-20261016` at immutable commit `7f64307c651404f97596d8b0210401cd247c3b61`. Its manifest records revision 338, 1,712 objects, 3,922 relations, six projects and 849 retained sources. The matching key file originally lived at `/Users/louis/Desktop/lg/mex/.local-data/lspm-github-db-backup.key`; keep its contents out of chat and Git. To inspect this backup, store the file contents as the repository Actions secret `LSPM_DB_BACKUP_KEY`, then run **Inspect original encrypted database backup**. That workflow verifies the encrypted and plaintext SHA-256 digests, SQLite integrity, foreign keys, revision and manifest counts. It uploads only table names, column names and counts, and publishes that metadata to `recovery/backup-inspection` for native Git access; the decrypted database is deleted from its temporary directory. This is an inspection, not an import. The backup's newer schema and relationship definitions must be reconciled with the current app before importing. Firebase-only uploads and cloud-created records are not included in this local backup, so it does not establish a complete Firebase migration.
+The checksum-verified encrypted database is retained in `backups/` in the current checkout. Its manifest records revision 338, 1,712 objects, 3,922 relations, six projects and 849 retained sources. The matching key file originally lived at `/Users/louis/Desktop/lg/mex/.local-data/lspm-github-db-backup.key`; keep its contents out of chat and Git. To inspect this backup, store the file contents as the repository Actions secret `LSPM_DB_BACKUP_KEY`, then run **Inspect original encrypted database backup**. That workflow verifies the encrypted and plaintext SHA-256 digests, SQLite integrity, foreign keys, revision and manifest counts. It uploads only table names, column names and counts, and publishes that metadata to `recovery/backup-inspection` for native Git access; the decrypted database is deleted from its temporary directory. This is an inspection, not an import. The backup's newer schema and relationship definitions must be reconciled with the current app before importing. Firebase-only uploads and cloud-created records are not included in this local backup, so it does not establish a complete Firebase migration.
 
 The original backup was verified successfully in GitHub Actions. Migration `202610170003_backup_recovery.sql` preserves its project types and source metadata. The updated ontology model uses the definitions from that same immutable backup commit. After the latest main deployment succeeds, **Restore original objects to Supabase** verifies and decrypts the backup again, stages every original table row in administrator-only tables, and atomically imports the core records into the pinned public workspace. It refuses to import if application records already exist in any Supabase workspace. Failed commits roll back all application rows; reruns resume staging or recognize an already committed backup without overwriting later edits. Original extra tables and metadata remain in the private recovery archive, not in public JSON. Their newer dedicated editing screens are not part of this recovery.
 
@@ -91,8 +91,8 @@ Free projects can pause for low activity. Maintain independent database and sour
 
 ### Latest interface (2026-10-17)
 
-The frontend now uses the latest application source from backup branch commit
-`33130bd4d51bed60b04ff14cdb8d91be9caaae7f`, including project types, improved maps,
+The frontend uses the latest application source from `backup/local-pm-20261016`,
+including project types, improved maps,
 hourly production charts, progress playback and sample preparation checksheets.
 `client-assets.js` is the shared explicit asset list for local serving and Pages.
 Builds never include database backups or retained source files.
@@ -113,3 +113,19 @@ The release workflow verifies the new backend reads before publishing Pages, the
 opens the actual published site in Chromium to check its UI source marker,
 login-free project listing and nonempty Global Library relationship map. A failed
 browser check fails the workflow even if the Pages publication itself completed.
+
+
+### Repository publication controls
+
+This repository is public. Keep plaintext SQLite exports, retained source bytes,
+server credentials and environment files outside Git. Only the encrypted snapshot
+and its checksum manifest belong in `backups/`. `npm run check:publication` rejects
+tracked plaintext database files and detected credential formats, and checks the
+browser asset allowlist. Both deployment jobs enforce it. Public publishable
+Supabase keys are allowed; service-role tokens and personal access tokens are not.
+
+Recovery workflows use the encrypted backup from their checked-out release and
+verify its manifest checksums before decryption. They do not rely on commit IDs
+that can change during a privacy history rewrite. Removing data from Git history
+does not delete existing clones, GitHub caches or external copies. Previously
+exposed keys require review or rotation with their provider.
