@@ -58,7 +58,14 @@ module.exports=function({db,load,read,snapshot,rowDiff,putSettings}){
   });return {...result,workspace:yield* load()};
  }
  function* historyList(q){return D.query(yield* load(),q);}
- function* historyDetail(id,scope){const w=yield* load(),result=D.detail(w,id,scope),sources=[];for(const link of result.links.filter(r=>r.from===id&&r.type==='supported_by')){const evidence=w.library.entities.find(e=>e.id===link.to),source=evidence?.sourceId?yield db.prepare('SELECT * FROM sources WHERE id=?').get(evidence.sourceId):null;sources.push({name:evidence?.name,excerpt:link.sourceExcerpt||'',text:evidence?.rawLog||(source&&source.mime_type!=='application/pdf'?Buffer.from(source.content).toString('utf8'):''),metadata:source?.metadata_json?JSON.parse(source.metadata_json):{},attachment:source?.mime_type==='application/pdf'});}return {...result,sources,proposals:[]};}
+ function* historyDetail(id,scope){
+  const w=yield* load(),result=D.detail(w,id,scope),sources=[],sourceIds=new Set();
+  const append=(source,evidence,excerpt='')=>{if(source?.id)sourceIds.add(source.id);sources.push({sourceId:source?.id||evidence?.sourceId||'',name:evidence?.name||source?.filename||'Original source',excerpt,text:evidence?.rawLog||(source&&source.mime_type!=='application/pdf'?Buffer.from(source.content).toString('utf8'):''),metadata:source?.metadata_json?JSON.parse(source.metadata_json):{},attachment:source?.mime_type==='application/pdf'});};
+  for(const link of result.links.filter(r=>r.from===id&&r.type==='supported_by')){const evidence=w.library.entities.find(e=>e.id===link.to),source=evidence?.sourceId?yield db.prepare('SELECT * FROM sources WHERE id=?').get(evidence.sourceId):null;append(source,evidence,link.sourceExcerpt||'');}
+  const direct=result.event.sourceId||(id.startsWith('cloud-event-')?'cloud-progress-source-'+id.slice('cloud-event-'.length):'');
+  if(direct&&!sourceIds.has(direct)){const source=yield db.prepare('SELECT * FROM sources WHERE id=?').get(direct);if(source)append(source,null);}
+  return {...result,links:result.links.map(link=>({...link,fromName:w.library.entities.find(e=>e.id===link.from)?.name||link.from,toName:w.library.entities.find(e=>e.id===link.to)?.name||link.to})),sources,proposals:[]};
+ }
  function* historyJobs(scope){if(scope!=='library')yield* project(scope);return (yield* read('SELECT * FROM ingestion_jobs ORDER BY created_at')).filter(r=>JSON.parse(r.draft_json||'{}').scope===scope).map(r=>({id:r.id,jobId:r.id,status:r.status,draft:JSON.parse(r.draft_json||'{}').draft||{events:[]}})).filter(j=>Array.isArray(j.draft.events));}
  return {listHourly,samplePreparationList,listProgress,hourlySave,featureSave,hourlyRateSave,samplePreparationSave,saveProgress,historyList,historyDetail,historyJobs};
 };

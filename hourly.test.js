@@ -17,3 +17,12 @@ test('hourly DB persists features and versioned production without changing WIP/
  d.close();d=openStore(file);a.equal(d.listHourly(p.id).at(-1).actual,230);a.equal(d.load().viewSettings[p.id].features.hourly,true);
  }finally{d.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+
+test('migrated Progress detail retains its direct original source and readable subject names',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pm-progress-source-')),{openStore}=require('./local-store'),d=openStore(path.join(dir,'db.sqlite'));
+ try{let w=d.load(),p=P.create('LS'),part=M.addEntity(p,{type:'Part',name:'Model',itemKind:'product'}),step=M.addEntity(p,{type:'Production Step',name:'Operation'});M.addRelation(p,{type:'applies_to',from:step.id,to:part.id});w.projects.push(p);w=d.save(w,null,w.revision);w=d.save({...w,projects:[p]},p.id,w.revision);
+ const saved=d.saveProgress({projectId:p.id,revision:w.revision,text:'Original WIP observation',rows:[{partId:part.id,stepId:step.id,capturedAt:'2026-10-17T09:00:00-06:00',quantity:0,unit:'pcs'}]});
+ const detail=d.historyDetail(saved.eventIds[0],p.id);a.equal(detail.sources[0].text,'Original WIP observation');a.ok(detail.links.some(l=>l.toName==='Model'));a.equal(d.listProgress(p.id).rows[0].quantity,0);
+ }finally{d.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
