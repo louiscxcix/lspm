@@ -9,7 +9,7 @@
     "public_objects": 676,
     "archived_rows": 9641
   },
-  "previouslyCommitted": false,
+  "previouslyCommitted": true,
   "additionalTablesPreserved": [
     "event_change_proposals",
     "hourly_records",
