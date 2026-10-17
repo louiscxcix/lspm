@@ -1,0 +1,19 @@
+{
+  "status": "restored",
+  "revision": 338,
+  "counts": {
+    "objects": 1712,
+    "relations": 3922,
+    "projects": 6,
+    "sources": 849,
+    "public_objects": 676,
+    "archived_rows": 9641
+  },
+  "previouslyCommitted": false,
+  "additionalTablesPreserved": [
+    "event_change_proposals",
+    "hourly_records",
+    "sample_preparation_records"
+  ],
+  "endpointStatus": "verified"
+}
