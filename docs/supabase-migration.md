@@ -39,6 +39,8 @@ The allowed browser origin defaults to `https://louiscxcix.github.io`. For anoth
 
 The workflow `.github/workflows/supabase.yml` tests PostgreSQL and the app. On `main`, it deploys the backend before publishing the cloud frontend. Configure the repository Actions secret `SUPABASE_ACCESS_TOKEN` and set Settings → Pages → Source to **GitHub Actions**. Then merge the migration branch to `main` or run the workflow on `main`. API access to GitHub is not required for a native Git push, but is needed to configure these repository settings automatically.
 
+The deploy job checks Pages configuration before changing Supabase. If `configure-pages` reports `Get Pages site failed` with `Not Found`, open [repository Pages settings](https://github.com/louiscxcix/lspm/settings/pages), select **Build and deployment → Source → GitHub Actions**, save, and rerun the workflow. If the source is already selected, inspect that page for repository access or Pages availability restrictions. Automatic first-time enablement requires a separate token with the permissions documented by `actions/configure-pages`; the default workflow token cannot enable a missing site. The workflow does not request another token or bypass the check.
+
 `build:cloud` copies application assets only; it never opens SQLite or publishes project records. The older `build-public.js` remains available for explicit read-only snapshot exports and is not used by this workflow.
 
 ## Import the original data

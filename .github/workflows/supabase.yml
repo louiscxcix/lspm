@@ -49,6 +49,19 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v5
+      - name: Check GitHub Pages configuration
+        uses: actions/configure-pages@v5
+        id: pages_config
+      - name: Explain required Pages setup
+        if: failure() && steps.pages_config.outcome == 'failure'
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'PAGES'
+          GitHub Pages configuration could not be loaded. Open
+          https://github.com/louiscxcix/lspm/settings/pages
+          and set **Build and deployment → Source → GitHub Actions**.
+          Save the setting, then rerun this workflow. If it is already selected,
+          check repository access and the Pages availability message on that page.
+          PAGES
       - uses: actions/setup-node@v5
         with:
           node-version: 24.19.0
@@ -66,7 +79,6 @@ jobs:
       - name: Verify hosted Supabase endpoint
         run: node scripts/verify-supabase.js
       - run: npm run build:cloud
-      - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: public-build
