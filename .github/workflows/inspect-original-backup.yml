@@ -1,0 +1,75 @@
+name: Inspect original encrypted database backup
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/inspect-original-backup.yml
+      - scripts/inspect-encrypted-backup.js
+
+permissions:
+  contents: read
+
+concurrency:
+  group: inspect-original-backup
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.19.0
+      - name: Fetch the original encrypted backup
+        uses: actions/checkout@v5
+        with:
+          ref: 7f64307c651404f97596d8b0210401cd247c3b61
+          path: backup-source
+          sparse-checkout: backups
+          persist-credentials: false
+      - name: Verify key, checksums, integrity and schema
+        run: node scripts/inspect-encrypted-backup.js backup-source/backups backup-metadata.json
+        env:
+          LSPM_DB_BACKUP_KEY: ${{ secrets.LSPM_DB_BACKUP_KEY }}
+      - name: Save schema and count report only
+        uses: actions/upload-artifact@v4
+        with:
+          name: original-backup-metadata
+          path: backup-metadata.json
+          retention-days: 3
+          if-no-files-found: error
+
+  publish-metadata:
+    needs: inspect
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: repository
+      - uses: actions/download-artifact@v4
+        with:
+          name: original-backup-metadata
+          path: inspection-report
+      - name: Publish verification metadata for Git-based inspection
+        working-directory: repository
+        run: |
+          if git ls-remote --exit-code --heads origin recovery/backup-inspection >/dev/null; then
+            git fetch origin recovery/backup-inspection
+            git switch -c backup-inspection FETCH_HEAD
+          else
+            git switch --orphan backup-inspection
+            git rm -rf .
+          fi
+          cp ../inspection-report/backup-metadata.json backup-metadata.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backup-metadata.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Record verified original backup schema and counts'
+          git push origin HEAD:refs/heads/recovery/backup-inspection
