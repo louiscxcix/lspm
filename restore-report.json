@@ -11,9 +11,7 @@
   },
   "previouslyCommitted": true,
   "additionalTablesPreserved": [
-    "event_change_proposals",
-    "hourly_records",
-    "sample_preparation_records"
+    "event_change_proposals"
   ],
   "endpointStatus": "verified"
 }
