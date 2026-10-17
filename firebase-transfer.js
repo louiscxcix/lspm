@@ -187,9 +187,10 @@ async function importSupabase(input){
     console.log(JSON.stringify({status:'already_imported',snapshotHash:manifest.sha256,...verified}));return;
   }
   async function stage(rows,table,columns){
-    let batch=[],size=0,done=0;
-    async function flush(){if(!batch.length)return;const definition=columns.map(([k,t])=>k+' '+t).join(',');await query(`INSERT INTO pm.${table}(snapshot_hash,${columns.map(([k])=>k).join(',')}) SELECT $1,x.* FROM jsonb_to_recordset($2::jsonb) AS x(${definition}) ON CONFLICT DO NOTHING`,[manifest.sha256,JSON.stringify(batch)]);done+=batch.length;console.log(JSON.stringify({stage:table,confirmed:done,total:rows.length}));batch=[];size=0;}
-    for(const row of rows){const n=Buffer.byteLength(JSON.stringify(row));if(size+n>600000)await flush();batch.push(row);size+=n;}await flush();
+    let batch=[],size=0,done=0;const batches=[];
+    for(const row of rows){const n=Buffer.byteLength(JSON.stringify(row));if(size+n>600000&&batch.length){batches.push(batch);batch=[];size=0;}batch.push(row);size+=n;}if(batch.length)batches.push(batch);
+    const definition=columns.map(([k,t])=>k+' '+t).join(',');
+    await require('./scripts/stage-batches').stageBatches(batches,group=>query(`INSERT INTO pm.${table}(snapshot_hash,${columns.map(([k])=>k).join(',')}) SELECT $1,x.* FROM jsonb_to_recordset($2::jsonb) AS x(${definition}) ON CONFLICT DO NOTHING`,[manifest.sha256,JSON.stringify(group)]),{onConfirmed:group=>{done+=group.length;console.log(JSON.stringify({stage:table,confirmed:done,total:rows.length}));}});
   }
   const present=new Map((await query('SELECT path,sha256 FROM pm.firebase_documents WHERE snapshot_hash=$1',[manifest.sha256])).map(d=>[d.path,d.sha256]));
   const documents=data.documents.map(d=>({path:d.path,document_json:d.document_json,sha256:hash(d.document_json)}));
