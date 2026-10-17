@@ -61,6 +61,8 @@ The importer requires an empty target account. It preserves object/project IDs, 
 
 After importing, sign in, inspect real projects and relations, export again, and compare counts/source bytes. Only then treat the original data as migrated. Changes in the local SQLite app do not automatically synchronize with Supabase; use the online app after cutover.
 
+If Global Library is empty, open the latest GitHub Actions run's **Summary → Supabase data status**. The deployment diagnostic uses the existing repository secret to count all objects and the pinned public owner's objects without printing object contents or user IDs. `NO_OBJECTS` means the original objects have not reached this Supabase project; `PUBLIC_WORKSPACE_EMPTY` means objects exist under another owner and publication needs review; `PUBLIC_DATA_PRESENT` means the public owner has objects and the frontend/API should be investigated. These counts do not restore or modify any data. Local exports and database files are ignored by Git, so deploying repository code does not transfer them.
+
 ## Verification
 
 ```sh

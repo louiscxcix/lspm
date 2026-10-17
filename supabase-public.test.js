@@ -7,6 +7,7 @@ const {applyMigrations}=require('./scripts/supabase-migrations');
 const {withPostgresStore,withPublicPostgresStore}=require('./postgres-store');
 const {createCloudHandler}=require('./cloud-handler');
 const {createPublicDataStore}=require('./public-data-api');
+const {inspectData}=require('./scripts/inspect-supabase-data');
 const Projects=require('./projects'),Model=require('./ontology-model');
 
 test('public workspace is pinned, readable without login, and cannot be changed by guests', {skip:!process.env.TEST_DATABASE_URL},async()=>{
@@ -20,6 +21,8 @@ test('public workspace is pinned, readable without login, and cannot be changed 
     // Test bootstrap does not need an anonymous database role; production Supabase has it.
     await admin.query("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon NOLOGIN; END IF; END $$");
     await applyMigrations(async sql=>(await client.query(sql)).rows,path.join(__dirname,'supabase/migrations'),()=>{});
+    const inspect=()=>inspectData(async sql=>(await client.query(sql)).rows);
+    assert.equal((await inspect()).status,'NO_OBJECTS');
     assert.equal((await client.query('SELECT owner_id FROM pm.publication')).rows[0].owner_id,owner);
     let ws=await withPostgresStore(client,owner,s=>s.load());ws.projects.push(Projects.create('Visible project'));
     ws=await withPostgresStore(client,owner,s=>s.save(ws,null,ws.revision));
@@ -42,6 +45,14 @@ test('public workspace is pinned, readable without login, and cannot be changed 
     await withPostgresStore(client,owner,s=>s.putSettings(projectId,'production',{zoom:1.5}));
     let hidden=await withPostgresStore(client,other,s=>s.load());hidden.projects.push(Projects.create('Other private account'));
     await withPostgresStore(client,other,s=>s.save(hidden,null,hidden.revision));
+    const visible=await inspect();assert.equal(visible.status,'PUBLIC_DATA_PRESENT');
+    assert.equal(visible.counts.total_objects,3);assert.equal(visible.counts.public_objects,3);
+    assert.equal(visible.counts.total_projects,2);assert.equal(visible.counts.public_projects,1);
+    await client.query('BEGIN');
+    try{
+      await client.query('UPDATE pm.publication SET owner_id=$1',[randomUUID()]);
+      const unlinked=await inspect();assert.equal(unlinked.status,'PUBLIC_WORKSPACE_EMPTY');assert.equal(unlinked.counts.total_objects,3);assert.equal(unlinked.counts.public_objects,0);
+    }finally{await client.query('ROLLBACK');}
     const anonRead=async(operation,project='',snapshot='')=>{
       await client.query('BEGIN');
       try{await client.query('SET LOCAL ROLE anon');const result=await client.query('SELECT public.pm_public_read($1,$2,$3) AS value',[operation,project,snapshot]);await client.query('COMMIT');return result.rows[0].value;}
