@@ -42,3 +42,20 @@ An account is not automatically a confirmed employee identity. Do not merge peop
 Verify Supabase document counts, source counts, owner workspace revision, and actual public project/Progress API responses after transfer. Test the publisher twice; the second unchanged run must not create new records. Do not declare success from a GitHub push or a queued workflow alone.
 
 Firebase and the original local database remain unchanged, so rollback does not require deletion of any source. Disable the publisher device if necessary, retain the export and conflict ledger, and review imported IDs before any separately authorized reversal. Supabase-only online records must never be replaced by an older local restore image.
+
+
+## Migrated owner sign-in
+
+The verified original Firebase owner email is configured server-side as
+`PM_WORKSPACE_OWNER_EMAIL`. When that email signs in through Supabase Auth, the
+Edge Function opens the preserved owner workspace; it does not move or duplicate
+its rows. The email must be confirmed. Other users keep their own isolated
+workspaces, and browser-supplied metadata cannot select the migration owner.
+Firebase passwords and sessions are not imported: the owner must create a
+Supabase account using the same email and complete email confirmation once.
+
+The deploy workflow verifies a real authenticated create/save/reload with a
+short-lived synthetic account, checks that the project is absent from public
+reads, then removes the test account and its records. It never changes the
+owner's data or credentials. All numbered migrations and the Firebase transfer,
+publisher and identity guards are part of normal CI checks.

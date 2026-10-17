@@ -50,3 +50,11 @@ test('cloud API serves the existing workspace/save/revert contract over authenti
   response=await request('export');assert.equal(response.status,200);assert.equal((await response.json()).format,'pm-process-twin-local');
   response=await request('../index.html');assert.equal(response.status,404);
 });
+
+
+test('authenticated owner mapping uses the server-resolved workspace, ignoring browser owner parameters',async()=>{
+ const owner='d629ba18-2539-4274-b8dd-4dd04466a56c';let opened;
+ const handler=createCloudHandler({allowedOrigins:[],authenticate:async()=>({id:'authenticated-user',workspaceId:owner}),withStore:async(id,fn)=>{opened=id;return fn({load:async()=>({revision:1,projects:[]})});}});
+ const response=await handler(new Request('https://example.supabase.co/ontology/api/workspace?owner_id=untrusted',{headers:{Authorization:'Bearer valid'}}));
+ assert.equal(response.status,200);assert.equal(opened,owner);
+});

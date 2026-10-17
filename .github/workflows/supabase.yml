@@ -33,7 +33,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node scripts/check-publication-safety.js
-      - run: psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/test-bootstrap.sql -f supabase/migrations/202610160001_ontology.sql -f supabase/migrations/202610170001_public_workspace.sql -f supabase/migrations/202610170002_public_data_api.sql -f supabase/migrations/202610170003_backup_recovery.sql -f supabase/migrations/202610170004_latest_production_views.sql
+      - name: Initialize all migration versions for tests
+        run: |
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/test-bootstrap.sql
+          for migration in supabase/migrations/*.sql; do
+            psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
       - run: npm test
       - run: npm run build:supabase && npm run build:cloud
 
@@ -84,6 +89,10 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       - name: Verify hosted Supabase endpoint
         run: node scripts/verify-supabase.js
+      - name: Verify authenticated editor persistence and isolation
+        run: node scripts/verify-editor.js
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       - run: npm run build:cloud
       - uses: actions/upload-pages-artifact@v3
         with:

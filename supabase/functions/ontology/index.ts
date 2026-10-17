@@ -1,5 +1,5 @@
 import postgres from 'npm:postgres@3.4.7';
-import {createCloudHandler,withPostgresStore,createPublicDataStore} from './app.mjs';
+import {createCloudHandler,withPostgresStore,createPublicDataStore,resolveWorkspaceId} from './app.mjs';
 
 const url=Deno.env.get('SUPABASE_URL')!;
 const apiKey=Object.values(JSON.parse(Deno.env.get('SUPABASE_PUBLISHABLE_KEYS')||'{}'))[0] as string || Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -13,7 +13,15 @@ Deno.serve(createCloudHandler({
   authenticate:async (token:string)=>{
     const response=await fetch(url+'/auth/v1/user',{headers:{apikey:apiKey,Authorization:'Bearer '+token}});
     if(!response.ok)throw Error('Invalid session.');
-    return await response.json();
+    const user=await response.json();
+    const workspaceId=await resolveWorkspaceId(user,{
+      ownerEmail:Deno.env.get('PM_WORKSPACE_OWNER_EMAIL')||'',
+      loadPublishedOwner:async()=>{
+        const rows=await database`SELECT owner_id FROM pm.publication WHERE singleton=true`;
+        return rows[0]?.owner_id;
+      }
+    });
+    return {...user,workspaceId};
   },
   withStore:async (userId:string,operation:Function)=>{
     const connection=await database.reserve();

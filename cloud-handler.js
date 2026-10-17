@@ -64,7 +64,7 @@ function createCloudHandler({authenticate,withStore,withPublicStore,allowedOrigi
     let bytes;
     try{bytes=await bodyBytes(request);}catch{return respond(413,{error:'Request exceeds 16 MB.'});}
     try{
-      return await withStore(user.id,async (store,client)=>{
+      return await withStore(user.workspaceId||user.id,async (store,client)=>{
         if(pathname==='/api/import'&&request.method==='POST'){
           if(!request.headers.get('content-type')?.startsWith('application/json'))return respond(400,{error:'Use application/json.'});
           return respond(200,await importBackup(store,client,JSON.parse(bytes.toString())));
