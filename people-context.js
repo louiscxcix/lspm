@@ -16,8 +16,8 @@ if(require.main===module){
  for(const s of db.prepare("SELECT id,content,metadata_json FROM sources WHERE mime_type<>'application/pdf'").all()){
   const metadata=JSON.parse(s.metadata_json||'{}');if(!['kakao','kakao-group'].includes(metadata.provider))continue;
   const text=Buffer.from(s.content).toString('utf8');try{if(JSON.parse(text)?.cdrToken)continue;}catch{}
-  const candidates=people.filter(p=>p.name.trim().length>=2&&text.includes(p.name)).map(p=>p.id);
-  if(candidates.length)references.push({sourceId:s.id,roomId:metadata.roomId,logId:metadata.externalId,authorId:metadata.senderId,senderName:metadata.senderName,sentAt:metadata.sentAt,nameMatchCandidates:candidates,identityConfirmedByNameMatch:false});
+  const authorId=metadata.senderId||metadata.authorId,candidates=people.filter(p=>p.name.trim().length>=2&&text.includes(p.name)).map(p=>p.id),accounts=people.filter(p=>p.kakaoAuthorId&&p.kakaoAuthorId===String(authorId)).map(p=>({id:p.id,...(p.canonicalId?{canonicalId:p.canonicalId}:{}),matchBasis:'recorded_author_id'}));
+  if(candidates.length||accounts.length)references.push({sourceId:s.id,roomId:metadata.roomId,logId:metadata.externalId,authorId,senderName:metadata.senderName,sentAt:metadata.sentAt,senderAccounts:accounts,nameMatchCandidates:candidates,identityConfirmedByNameMatch:false});
  }
  db.close();const file=path.join(base,'people-context-review.json');fs.writeFileSync(file,JSON.stringify({generatedAt:new Date().toISOString(),people,references,policy:'Name mentions are candidates, not confirmed identity or employment. Use the original sources before adding facts.'},null,2),{mode:0o600});
  console.log(JSON.stringify({peopleReviewed:people.length,confirmedAccountMappings:people.filter(p=>p.canonicalId).length,sourceReferencesForReview:references.length,privateReviewFile:file,databaseModified:false}));

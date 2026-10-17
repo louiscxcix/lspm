@@ -30,8 +30,14 @@ async function publish({fetchImpl=fetch,configFile=configPath,stateFile=cachePat
   if(statusOnly)return rpc('pm_history_sync_status',{});
   const cache=fs.existsSync(stateFile)?JSON.parse(fs.readFileSync(stateFile)):{};
   const db=new DatabaseSync(dbFile,{readOnly:true});let rows;
-  try{rows=changesFrom(db,cache.records||{});}finally{db.close();}
-  if(!rows.length)return {unchanged:true,pendingConflicts:cache.pendingConflicts||0};
+  try{
+    const entities=db.prepare('SELECT data_json FROM entities').all().map(r=>JSON.parse(r.data_json));
+    const relations=db.prepare('SELECT data_json,scope_project_id FROM relations').all().map(r=>({...JSON.parse(r.data_json),scopeProjectId:r.scope_project_id}));
+    require('./ontology-model').validateStore({version:1,entities,relations});
+    if(entities.some(e=>e.type==='Event'&&e.eventRecord&&e.privacy!=='local_only'))throw Error('PRIVATE_HISTORY_REQUIRED');
+    rows=changesFrom(db,cache.records||{});
+  }finally{db.close();}
+  if(!rows.length){const remote=await rpc('pm_history_sync_status',{});return {unchanged:true,revision:remote.revision,pendingConflicts:cache.pendingConflicts||0};}
   cache.records||={};let changed=0,conflicts=0,revision;let batch=[];
   async function flush(){
     if(!batch.length)return;const changes=batch.map(({table,id,row,before})=>({table,id,row,...(before?{before}:{})})),result=await rpc('pm_ingest_local_history',{p_batch:{key:hash(changes),changes}}),accepted=new Set(result.accepted.map(x=>x.table+':'+x.id));
