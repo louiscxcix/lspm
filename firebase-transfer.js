@@ -172,23 +172,33 @@ async function importSupabase(input){
   if(hash(bytes)!==manifest.sha256)throw Error('BACKUP_HASH_MISMATCH');
   const data=JSON.parse(gunzipSync(bytes)),{createManagementApi}=require('./scripts/supabase-management');
   const token=process.env.SUPABASE_ACCESS_TOKEN;if(!token)throw Error('MISSING_SUPABASE_ACCESS_TOKEN');
-  const api=createManagementApi({project:'ahzpuefosoajwwgbfhng',token});
-  const query=(sql,parameters=[])=>api('/database/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:sql,...(parameters.length?{parameters}:{})})});
+  const api=createManagementApi({project:'ahzpuefosoajwwgbfhng',token,fetchImpl:(url,options)=>fetch(url,{...options,signal:AbortSignal.timeout(60000)})});
+  async function query(sql,parameters=[]){
+    for(let attempt=0;;attempt++)try{return await api('/database/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:sql,...(parameters.length?{parameters}:{})})});}catch(error){if(attempt>=5||!/could not connect|\((408|429|500|502|503|504)\)/.test(error.message))throw error;await new Promise(resolve=>setTimeout(resolve,Math.min(5000,1000*(attempt+1))));}
+  }
   const {applyMigrations}=require('./scripts/supabase-migrations');await applyMigrations(query,path.join(__dirname,'supabase/migrations'));
   const [target]=await query("SELECT p.owner_id,m.value::integer revision FROM pm.publication p JOIN pm.meta m ON m.owner_id=p.owner_id AND m.key='revision' WHERE p.singleton=true");
   if(!target)throw Error('TARGET_WORKSPACE_MISSING');
   await query("INSERT INTO pm.firebase_exports(snapshot_hash,owner_id,status,manifest) VALUES($1,$2,'staging',$3::jsonb) ON CONFLICT DO NOTHING",[manifest.sha256,target.owner_id,JSON.stringify(manifest)]);
   const[prior]=await query('SELECT status FROM pm.firebase_exports WHERE snapshot_hash=$1',[manifest.sha256]);
-  if(prior.status==='committed'){console.log(JSON.stringify({status:'already_imported',snapshotHash:manifest.sha256}));return;}
-  async function stage(rows,table,columns){
-    let batch=[],size=0;
-    async function flush(){if(!batch.length)return;const definition=columns.map(([k,t])=>k+' '+t).join(',');await query(`INSERT INTO pm.${table}(snapshot_hash,${columns.map(([k])=>k).join(',')}) SELECT $1,x.* FROM jsonb_to_recordset($2::jsonb) AS x(${definition}) ON CONFLICT DO NOTHING`,[manifest.sha256,JSON.stringify(batch)]);batch=[];size=0;}
-    for(const row of rows){const n=Buffer.byteLength(JSON.stringify(row));if(size+n>240000)await flush();batch.push(row);size+=n;}await flush();
+  if(prior.status==='committed'){
+    const[verified]=await query("SELECT count(*)::integer documents,count(*) FILTER(WHERE encode(extensions.digest(document_json,'sha256'),'hex')<>sha256)::integer invalid_hashes FROM pm.firebase_documents WHERE snapshot_hash=$1",[manifest.sha256]);
+    if(verified.documents!==data.documents.length||verified.invalid_hashes)throw Error('ARCHIVE_VERIFICATION_FAILED');
+    console.log(JSON.stringify({status:'already_imported',snapshotHash:manifest.sha256,...verified}));return;
   }
-  await stage(data.documents.map(d=>({path:d.path,document_json:d.document_json,sha256:hash(d.document_json)})),'firebase_documents',[['path','text'],['document_json','text'],['sha256','text']]);
+  async function stage(rows,table,columns){
+    let batch=[],size=0,done=0;
+    async function flush(){if(!batch.length)return;const definition=columns.map(([k,t])=>k+' '+t).join(',');await query(`INSERT INTO pm.${table}(snapshot_hash,${columns.map(([k])=>k).join(',')}) SELECT $1,x.* FROM jsonb_to_recordset($2::jsonb) AS x(${definition}) ON CONFLICT DO NOTHING`,[manifest.sha256,JSON.stringify(batch)]);done+=batch.length;console.log(JSON.stringify({stage:table,confirmed:done,total:rows.length}));batch=[];size=0;}
+    for(const row of rows){const n=Buffer.byteLength(JSON.stringify(row));if(size+n>600000)await flush();batch.push(row);size+=n;}await flush();
+  }
+  const present=new Map((await query('SELECT path,sha256 FROM pm.firebase_documents WHERE snapshot_hash=$1',[manifest.sha256])).map(d=>[d.path,d.sha256]));
+  const documents=data.documents.map(d=>({path:d.path,document_json:d.document_json,sha256:hash(d.document_json)}));
+  if(documents.some(d=>present.has(d.path)&&present.get(d.path)!==d.sha256))throw Error('STAGED_DOCUMENT_CHANGED');
+  console.log(JSON.stringify({stage:'resume',alreadyArchived:present.size,remaining:documents.length-present.size}));
+  await stage(documents.filter(d=>!present.has(d.path)),'firebase_documents',[['path','text'],['document_json','text'],['sha256','text']]);
   await stage(data.candidates,'firebase_candidates',[['table_name','text'],['key_json','jsonb'],['row_json','jsonb']]);
-  const[staged]=await query('SELECT (SELECT count(*)::integer FROM pm.firebase_documents WHERE snapshot_hash=$1) documents,(SELECT count(*)::integer FROM pm.firebase_candidates WHERE snapshot_hash=$1) candidates',[manifest.sha256]);
-  if(staged.documents!==data.documents.length||staged.candidates!==data.candidates.length)throw Error('STAGING_COUNT_MISMATCH');
+  const[staged]=await query("SELECT (SELECT count(*)::integer FROM pm.firebase_documents WHERE snapshot_hash=$1) documents,(SELECT count(*)::integer FROM pm.firebase_candidates WHERE snapshot_hash=$1) candidates,(SELECT count(*)::integer FROM pm.firebase_documents WHERE snapshot_hash=$1 AND encode(extensions.digest(document_json,'sha256'),'hex')<>sha256) invalid_hashes",[manifest.sha256]);
+  if(staged.documents!==data.documents.length||staged.candidates!==data.candidates.length||staged.invalid_hashes)throw Error('STAGING_COUNT_MISMATCH');
   await query(mergeSQL({tables:Object.keys(KEYS).filter(t=>data.candidates.some(c=>c.table_name===t)),snapshotHash:manifest.sha256,expectedRevision:target.revision}));
   const[result]=await query("SELECT e.status,(SELECT count(*)::integer FROM pm.firebase_documents WHERE snapshot_hash=e.snapshot_hash) documents,(SELECT count(*)::integer FROM pm.firebase_candidates WHERE snapshot_hash=e.snapshot_hash) candidates,(SELECT count(*)::integer FROM pm.firebase_conflicts WHERE snapshot_hash=e.snapshot_hash) preserved_conflicts,(SELECT count(*)::integer FROM pm.projects WHERE owner_id=e.owner_id) projects,(SELECT count(*)::integer FROM pm.entities WHERE owner_id=e.owner_id) objects,(SELECT count(*)::integer FROM pm.wip_snapshots WHERE owner_id=e.owner_id) progress_snapshots,(SELECT count(*)::integer FROM pm.wip_counts c JOIN pm.wip_snapshots s ON s.owner_id=c.owner_id AND s.id=c.snapshot_id WHERE c.owner_id=e.owner_id) progress_counts,(SELECT count(*)::integer FROM pm.sample_preparation_records WHERE owner_id=e.owner_id) preparation_records FROM pm.firebase_exports e WHERE snapshot_hash=$1",[manifest.sha256]);
   if(result.status!=='committed'||result.documents!==data.documents.length)throw Error('IMPORT_VERIFICATION_FAILED');
