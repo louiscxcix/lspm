@@ -7,7 +7,7 @@ const Ingest = require('./ingestion.js');
 const Model = require('./ontology-model.js');
 const WIP = require('./wip.js');
 
-const ASSETS = new Set(['index.html', 'styles.css', 'ontology-model.js', 'projects.js', 'import-resolver.js', 'ingestion.js', 'workflow.js', 'production-logs.js', 'analysis-views.js', 'apqp.js', 'local-api.js', 'supabase-public-api.js', 'supabase-api.js', 'supabase-config.js', 'app.js']);
+const ASSETS = new Set(['index.html', 'styles.css', 'ontology-model.js', 'history.js', 'projects.js', 'import-resolver.js', 'ingestion.js', 'workflow.js', 'production-logs.js', 'analysis-views.js', 'apqp.js', 'local-api.js', 'supabase-public-api.js', 'supabase-api.js', 'supabase-config.js', 'app.js']);
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
 const EXTRACTION_SCHEMA = {
   type: 'object', properties: {

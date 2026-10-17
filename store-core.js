@@ -81,6 +81,7 @@ function createStore(db) {
     const lanes = yield* read('SELECT project_id,entity_id,code FROM project_workstreams');
     const projects = (yield* read('SELECT * FROM projects ORDER BY rowid')).map((row) => ({
       id: row.id, name: row.name, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, version: 2,
+      projectType:row.project_type||null,
       entities: entities.filter((e) => memberships.some((m) => m.project_id === row.id && m.entity_id === e.id)).map((e) => ({ ...e, ...assessments.get(row.id + ':' + e.id), ...schedules.get(row.id + ':' + e.id), projectId: row.id })),
       relations: relations.filter((r) => (!r.scopeProjectId || r.scopeProjectId === row.id) && memberships.some((m) => m.project_id === row.id && m.entity_id === r.from) && memberships.some((m) => m.project_id === row.id && m.entity_id === r.to)).map((r) => ({ ...r, projectId: row.id })),
       changes: changes.filter((c) => (!c.scope || c.scope === row.id) && memberships.some((m) => m.project_id === row.id && m.entity_id === c.change.entityId)).map((c) => c.change),

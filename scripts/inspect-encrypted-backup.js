@@ -5,7 +5,7 @@ const {spawnSync}=require('node:child_process');
 const {DatabaseSync}=require('node:sqlite');
 const sha256=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
-function inspectEncryptedBackup({directory,key}){
+function withVerifiedBackup({directory,key},operation){
   if(!key?.trim())throw Error('Add the original key file contents as the GitHub repository secret LSPM_DB_BACKUP_KEY. Do not paste the key into chat.');
   const manifest=JSON.parse(fs.readFileSync(path.join(directory,'ontology-2026-10-16.manifest.json'),'utf8'));
   if(manifest.format!=='pm-local-sqlite-encrypted-v1'||manifest.encryption?.cipher!=='aes-256-cbc'||manifest.encryption?.kdf!=='PBKDF2'||manifest.encryption?.iterations!==200000)throw Error('Unsupported encrypted backup format.');
@@ -31,9 +31,11 @@ function inspectEncryptedBackup({directory,key}){
       tables[name]={count:db.prepare('SELECT count(*) AS count FROM '+quoted).get().count,columns:db.prepare('PRAGMA table_info('+quoted+')').all().map(c=>c.name)};
     }
     for(const [table,count] of Object.entries(manifest.counts))if(tables[table]?.count!==count)throw Error('Record count differs from the manifest for table '+table+'.');
-    return {revision,schemaVersion:Number(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value),integrity:'ok',encryptedChecksumVerified:true,plaintextChecksumVerified:true,tables};
+    const report={revision,schemaVersion:Number(db.prepare("SELECT value FROM meta WHERE key='schema_version'").get()?.value),integrity:'ok',encryptedChecksumVerified:true,plaintextChecksumVerified:true,tables};
+    return operation(db,report);
   }finally{if(db)db.close();fs.rmSync(temp,{recursive:true,force:true});}
 }
+function inspectEncryptedBackup(options){return withVerifiedBackup(options,(_db,report)=>report);}
 
 if(require.main===module){
   process.umask(0o077);
@@ -50,4 +52,4 @@ if(require.main===module){
     process.exitCode=1;
   }
 }
-module.exports={inspectEncryptedBackup};
+module.exports={inspectEncryptedBackup,withVerifiedBackup};

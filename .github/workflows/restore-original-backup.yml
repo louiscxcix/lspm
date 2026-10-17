@@ -1,0 +1,83 @@
+name: Restore original objects to Supabase
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Test and deploy Supabase app]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: restore-original-backup
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_sha == github.sha)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.19.0
+      - name: Fetch the verified original backup
+        uses: actions/checkout@v5
+        with:
+          ref: 7f64307c651404f97596d8b0210401cd247c3b61
+          path: backup-source
+          sparse-checkout: backups
+          persist-credentials: false
+      - name: Restore original records into an empty Supabase project
+        run: node scripts/restore-original-backup.js backup-source/backups restore-report.json
+        env:
+          LSPM_DB_BACKUP_KEY: ${{ secrets.LSPM_DB_BACKUP_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      - name: Verify the restored public endpoint
+        run: |
+          node scripts/verify-supabase.js
+          node -e "const f=require('node:fs'),p='restore-report.json',r=JSON.parse(f.readFileSync(p));r.endpointStatus='verified';f.writeFileSync(p,JSON.stringify(r,null,2))"
+      - name: Save safe restore result only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: original-backup-restore-report
+          path: restore-report.json
+          retention-days: 3
+          if-no-files-found: error
+
+  publish-result:
+    needs: restore
+    if: always() && !cancelled() && needs.restore.result != 'skipped'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: repository
+      - uses: actions/download-artifact@v4
+        with:
+          name: original-backup-restore-report
+          path: restore-result
+      - name: Publish safe counts and verification status
+        working-directory: repository
+        run: |
+          if git ls-remote --exit-code --heads origin recovery/restore-status >/dev/null; then
+            git fetch origin recovery/restore-status
+            git switch -c restore-status FETCH_HEAD
+          else
+            git checkout --orphan restore-status
+            git rm -rf .
+          fi
+          cp ../restore-result/restore-report.json restore-report.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add restore-report.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Record original database restore counts and endpoint verification'
+          git push origin HEAD:refs/heads/recovery/restore-status

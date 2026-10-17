@@ -32,7 +32,11 @@ function createCloudHandler({authenticate,withStore,withPublicStore,allowedOrigi
         if(route==='health'){if(store.health)await store.health();else await store.load();return respond(200,{ok:true,readOnly:true});}
         if(route==='workspace'){
           const workspace=await store.load();workspace.pendingChange=null;
+          const privateIds=new Set([workspace.library,...workspace.projects].flatMap(graph=>graph.entities.filter(e=>e.privacy==='local_only').map(e=>e.id)));
           for(const graph of [workspace.library,...workspace.projects]){
+            graph.entities=graph.entities.filter(e=>!privateIds.has(e.id));
+            graph.relations=graph.relations.filter(r=>!privateIds.has(r.from)&&!privateIds.has(r.to));
+            if(graph.workstreams)for(const id of privateIds)delete graph.workstreams[id];
             graph.changes=[];
             for(const entity of graph.entities){delete entity.rawLog;delete entity.sourceExcerpt;}
             for(const relation of graph.relations)delete relation.sourceExcerpt;

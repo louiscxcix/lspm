@@ -9,7 +9,7 @@
   ];
 
   const RELATION_TYPES = [
-    "scopes", "applies_to", "precedes", "assigned_to", "assignment_scope", "satisfies", "verifies", "characteristic_of", "controls", "approved_by", "blocks", "supersedes", "required_for", "apqp_input_to",
+    "reported_by", "operated_in", "supports_line", "member_of", "reports_via", "escalates_to", "works_on", "stored_at", "receives_from", "transfers_to", "manages", "scopes", "applies_to", "precedes", "assigned_to", "assignment_scope", "satisfies", "verifies", "characteristic_of", "controls", "approved_by", "blocks", "supersedes", "required_for", "apqp_input_to",
     "supplies", "works_at", "reports_to", "part_of", "consumes", "produces", "condition_target", "records_on", "supported_by", "potentially_affects", "requires", "mitigates", "resolves", "revision_of", "changes", "influences", "governs", "on_failure", "rework_of", "qualified_for"
   ];
   const PROJECT_OWNED_TYPES = new Set(["Build", "Work Item", "Gate", "Deliverable", "Assignment", "Event", "Evidence", "Risk", "Issue", "Decision"]);
@@ -22,7 +22,22 @@
     {code:'logistics',label:'Logistics'}
   ];
 
+  RELATION_TYPES.push('performed_by','requested_from','follows_up');
   const RULES = {
+    performed_by: [['Event','Person'],['Event','Organization']],
+    requested_from: [['Event','Person'],['Event','Organization']],
+    follows_up: [['Event','Event']],
+    reported_by: [["Event","Person"]],
+    operated_in: [["Production Step","Resource"]],
+    supports_line: [["Organization","Resource"]],
+    member_of: [["Person","Organization"]],
+    reports_via: [["Person","Organization"]],
+    escalates_to: [["Resource","Organization"],["Organization","Organization"],["Organization","Person"]],
+    works_on: [["Person","Resource"]],
+    stored_at: [["Part","Resource"],["Part Revision","Resource"]],
+    receives_from: [["Resource","Organization"],["Resource","Resource"]],
+    transfers_to: [["Resource","Production Step"],["Production Step","Resource"],["Resource","Resource"]],
+    manages: [["Person","Resource"]],
     satisfies: [["Deliverable","Requirement"],["Evidence","Requirement"]],
     verifies: [["Evidence","Requirement"],["Evidence","Characteristic"],["Deliverable","Requirement"],["Deliverable","Characteristic"]],
     characteristic_of: [["Characteristic","Part Revision"],["Characteristic","Part"]],
@@ -43,22 +58,31 @@
     revision_of: [["Part Revision", "Part"]],
     changes: [["Decision", "Work Item"], ["Decision", "Production Step"], ["Decision", "Requirement"]],
     scopes: [["Project", "Work Item"], ["Build", "Work Item"], ["Project", "Gate"]],
-    applies_to: [["Work Item", "Part Revision"], ["Production Step", "Part"], ["Production Step", "Part Revision"], ["Deliverable", "Part Revision"], ["Gate", "Part Revision"], ["Requirement", "Part Revision"]],
+    applies_to: [["Work Item", "Part"], ["Work Item", "Part Revision"], ["Production Step", "Part"], ["Production Step", "Part Revision"], ["Deliverable", "Part Revision"], ["Gate", "Part Revision"], ["Requirement", "Part Revision"]],
     precedes: [["Work Item", "Work Item"], ["Production Step", "Production Step"]],
     assigned_to: [["Assignment", "Person"], ["Assignment", "Organization"]],
     assignment_scope: [["Assignment", "Work Item"], ["Assignment", "Production Step"], ["Assignment", "Gate"], ["Assignment", "Part Revision"], ["Assignment", "Part"], ["Assignment", "Deliverable"]],
     supplies: [["Organization", "Part Revision"], ["Organization", "Part"]],
     works_at: [["Person", "Organization"]],
     reports_to: [["Person", "Person"]],
-    part_of: [["Part", "Part"]],
+    part_of: [["Part", "Part"],["Resource", "Resource"]],
     consumes: [["Production Step", "Part"], ["Production Step", "Part Revision"]],
-    produces: [["Work Item", "Deliverable"], ["Production Step", "Part"], ["Production Step", "Part Revision"], ["Production Step", "Deliverable"]],
+    produces: [["Resource", "Part"], ["Work Item", "Deliverable"], ["Production Step", "Part"], ["Production Step", "Part Revision"], ["Production Step", "Deliverable"]],
     condition_target: [["Gate", "Work Item"], ["Gate", "Production Step"], ["Gate", "Deliverable"]],
     records_on: [["Event", "Work Item"], ["Event", "Production Step"], ["Event", "Part"], ["Event", "Part Revision"], ["Event", "Resource"], ["Event", "Gate"], ["Event", "Risk"], ["Event", "Issue"]],
     supported_by: [["Event", "Evidence"], ["Deliverable", "Evidence"], ["Production Step", "Evidence"], ["Part", "Evidence"], ["Part Revision", "Evidence"]],
     qualified_for: [["Person", "Production Step"], ["Person", "Resource"]]
   };
 
+  RULES.supersedes.push(['Event','Event']);
+  RULES.potentially_affects.push(['Risk','Resource']);
+  RELATION_TYPES.push('quality_reference','quality_case_of');
+  RULES.quality_reference=[['Requirement','Requirement'],['Requirement','Work Item'],['Requirement','Risk'],['Requirement','Issue'],['Work Item','Production Step']];
+  RULES.quality_case_of=[['Issue','Requirement'],['Event','Requirement']];
+  RULES.applies_to.push(['Requirement','Part']);
+  RULES.supported_by.push(['Requirement','Evidence']);
+  RULES.potentially_affects.push(['Risk','Part'],['Risk','Requirement']);
+  for(const type of ['Person','Organization','Build','Deliverable','Requirement','Decision'])RULES.records_on.push(['Event',type]);
   const COLORS = {
     Project: "#283a4e", Build: "#55687b", "Part Revision": "#0d93a5",
     "Work Item": "#1261d8", "Production Step": "#1261d8", Gate: "#e8792a", Deliverable: "#2f7d58",
@@ -107,7 +131,10 @@
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
   const DATE_FIELDS = ["baselineStart", "baselineEnd", "plannedStart", "plannedEnd", "forecastStart", "forecastEnd", "actualStart", "actualEnd", "due", "occurredDate", "assessedOn"];
   const TEXT_FIELDS = ["phase", "role", "raci", "readiness", "decision", "title", "power", "influence", "currentEngagement", "desiredEngagement", "currentRole", "desiredRole", "assessmentNote", "processLevel", "parentWorkId", "branchKind", "framework", "apqpPhase", "apqpWorkstream", "requirementSource", "customerId", "templateItemId", "templateVersion", "applicability", "completionState", "notApplicableReason", "approvedBy", "characteristicKind", "classification", "specification", "tolerance", "measurementMethod", "operationCode", "productionStage", "workCenter", "operatorAction", "acceptanceCriteria", "failureAction", "resourceKind", "machineMode", "machineFamily", "assetId", "model", "tier", "site", "capacityNote", "workerRole", "qualification", "shift", "workArea", "department", "productionFamily", "productFamily", "itemKind", "side", "verticalPosition", "pieceIndex"];
-  TEXT_FIELDS.push('occurredAt','productionEventKind','traceId','traceKind','rawLog','recordedAt');
+  TEXT_FIELDS.push('occurredAt','productionEventKind','traceId','traceKind','rawLog','recordedAt','storageRole','sourceEntityId','lotCode','quantityUnit','ledRank','lotMergeRule');
+  TEXT_FIELDS.push('modelCode','codeNamespace','sourcePartName','mappingState');
+  TEXT_FIELDS.push('displayProcessName');
+  TEXT_FIELDS.push('qualityKind','qualityCode','qualityColor','qualityDisposition','qualityGroup','qualityFamily','qualityPlan','qualityCC','qualityDocument');
   const LONG_TEXT_FIELDS = ["assessmentNote", "operatorAction", "acceptanceCriteria", "failureAction"];
   const PRODUCTION_EVENT_KINDS = ['arrived','started','completed','failed','held','released'];
   function isTimestamp(value) {
@@ -118,6 +145,11 @@
   }
   const ENGAGEMENT = ["unaware", "resistant", "neutral", "supportive", "leading"];
   function validateFields(entity) {
+    if(entity.eventRecord){
+      if(entity.type!=='Event')throw Error('History details belong to an Event.');
+      const history=typeof module==='object'?require('./history'):globalThis.EventHistory;
+      history.validateEvent(entity.eventRecord);
+    }
     for (const key of DATE_FIELDS) {
       const value = entity[key];
       if (value == null || value === "") continue;
@@ -148,6 +180,14 @@
     if (entity.classification && !["normal","significant","critical","customer_specific"].includes(entity.classification)) throw Error("Invalid characteristic classification.");
     if (entity.resourceKind && !["machine","line","tooling","test_equipment","facility","other"].includes(entity.resourceKind)) throw Error("Invalid resource kind.");
     if (entity.resourceKind && entity.type !== "Resource") throw Error("Resource kind belongs to a Resource.");
+    if(entity.displayProcessName&&entity.type!=='Production Step')throw Error('Display process name belongs to a Production Step.');
+    if(entity.qualityKind){
+      const kinds={policy:'Requirement',defect:'Requirement',visual:'Work Item',storage:'Work Item',route:'Work Item',action:'Work Item',case:'Issue'};
+      if(kinds[entity.qualityKind]!==entity.type)throw Error('Invalid quality kind / object type.');
+    }
+    if(entity.qualityColor&&!['red','yellow'].includes(entity.qualityColor))throw Error('Invalid quality identification color.');
+    if(entity.qualityDisposition&&!['hold','local','internal_smt','starpro','scrap','lot'].includes(entity.qualityDisposition))throw Error('Invalid quality disposition.');
+    if(entity.qualityColor&&entity.qualityKind!=='defect'&&entity.qualityKind!=='case')throw Error('Quality identification color belongs to a defect or case.');
     if (entity.productionFamily && !["Part", "Part Revision"].includes(entity.type)) throw Error("Production family belongs to a Part.");
     if (["productFamily", "itemKind", "side", "verticalPosition", "pieceIndex"].some(key=>entity[key]) && !["Part", "Part Revision"].includes(entity.type)) throw Error("Part classification belongs to a Part.");
     if (entity.itemKind && !["product", "component"].includes(entity.itemKind)) throw Error("Invalid Part item kind.");
@@ -174,7 +214,7 @@
   }
   function defaultRelationScope(store, relation, projectId) {
     if (!projectId || projectId === "library") return null;
-    if (["supplies", "works_at", "reports_to", "part_of", "revision_of", "qualified_for"].includes(relation.type)) return null;
+    if (["supplies", "works_at", "reports_to", "part_of", "revision_of", "qualified_for", "supports_line"].includes(relation.type)) return null;
     if (["precedes", "on_failure", "rework_of", "applies_to", "consumes", "produces", "requires", "controls"].includes(relation.type) && byId(store, relation.from)?.type === "Production Step") return null;
     return projectId;
   }
@@ -182,10 +222,12 @@
     const from = byId(store, relation.from), to = byId(store, relation.to);
     if (!from || !to) return "Choose two existing objects.";
     if (from.id === to.id) return "An object cannot connect to itself.";
+    if(relation.type==='quality_case_of'&&!['defect','policy'].includes(to.qualityKind))return 'Quality case requires a defect definition or Part policy.';
     if (!RELATION_TYPES.includes(relation.type)) return "Choose a supported relationship.";
     const allowed = RULES[relation.type].some(([source, target]) => source === from.type && target === to.type);
     if (!allowed) return `${relation.type} does not support ${from.type} → ${to.type}.`;
-    const material = from.type === "Production Step" && ["consumes", "produces"].includes(relation.type) && ["Part", "Part Revision"].includes(to.type);
+    if (relation.type==='supports_line'&&to.resourceKind!=='line') return 'Line support requires a production line.';
+    const material = (from.type === "Production Step" && ["consumes", "produces"].includes(relation.type) || from.type==='Resource'&&from.resourceKind==='line'&&relation.type==='produces') && ["Part", "Part Revision"].includes(to.type);
     const hasMaterialFields = ["quantity", "unit", "basis", "routePartId", "reviewState"].some(key=>relation[key] !== undefined && relation[key] !== "");
     if (hasMaterialFields && !material) return "Material details require a Production Step → Part consumes or produces relationship.";
     if (relation.quantity !== undefined && relation.quantity !== "" && (!Number.isSafeInteger(Number(relation.quantity)) || Number(relation.quantity) <= 0)) return "Material quantity must be a positive whole number.";
@@ -219,6 +261,7 @@
     if (!String(input.name || "").trim()) throw new Error("Name is required.");
     const entity = { id: id("obj"), type: input.type, name: input.name.trim(), context: String(input.context || "").trim(), status: input.status || "active" };
     for (const key of [...DATE_FIELDS, ...TEXT_FIELDS]) if (input[key]) entity[key] = input[key];
+    if(input.eventRecord)entity.eventRecord=clone(input.eventRecord);
     validateFields(entity);
     if (store.id) entity.projectId = store.id;
     store.entities.push(entity); return entity;
